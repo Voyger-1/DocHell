@@ -1,0 +1,34 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "go",
+      "request": "launch",
+      "name": "Launch PPTXhell (main.go)",
+      "mode": "debug",
+      "program": "${workspaceFolder}",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "${input:pptxFile}",
+        "${input:slideIndex}"
+      ]
+    }
+  ],
+  "inputs": [
+    {
+      "id": "pptxFile",
+      "type": "pickString",
+      "description": "Select the .pptx file to open for conversion",
+      "options": [
+        "example.pptx",
+        "f.pptx",
+        "i.pptx"
+      ]
+    },
+    {
+      "id": "slideIndex",
+      "type": "promptString",
+      "description": "Slide index (integer). main.go expects a number specifying how many slides to process or the target slide index."
+    }
+  ]
+}

@@ -66,6 +66,9 @@ func htmlEscape(s string) string {
 func runStyle(run textfinder.TextRun) string {
 	styles := make([]string, 0, 8)
 
+	styles = append(styles, "z-index:1")
+	styles = append(styles, "position:relative")
+
 	// Font weight
 	if run.Bold {
 		styles = append(styles, "font-weight:bold")
@@ -203,7 +206,7 @@ func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfi
 			style := runStyle(run)
 			text := htmlEscape(run.Text)
 			if style != "" {
-				inner.WriteString(fmt.Sprintf("<span style=\"%s\">%s</span>", style, text))
+				inner.WriteString(fmt.Sprintf("<p style=\"%s\">%s</p>", style, text))
 			} else {
 				inner.WriteString(text)
 			}
