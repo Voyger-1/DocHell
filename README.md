@@ -141,7 +141,7 @@ PPTX File → XML Parsing → Element Extraction → Style Processing → HTML G
 ### Setup
 ```bash
 git clone <repository-url>
-cd pptx2html
+cd pptXhell
 go mod tidy
 go build
 ```
