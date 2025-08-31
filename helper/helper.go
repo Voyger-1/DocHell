@@ -259,10 +259,13 @@ func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfi
 			left, top, w, h, svg))
 	}
 
-	// Render images
+	/*
+		Need To fix
+		// Render images
+	**/
 	for _, img := range images {
-		left := emuToPx(img.X)
-		top := emuToPx(img.Y)
+		// left := emuToPx(img.X)
+		// top := emuToPx(img.Y)
 		w := emuToPx(img.Cx)
 		h := emuToPx(img.Cy)
 		if w == 0 {
@@ -272,9 +275,9 @@ func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfi
 			h = 200
 		}
 
-		sb.WriteString(fmt.Sprintf(
-			`<img src="data:image/png;base64,%s" style="left:%dpx;top:%dpx;width:%dpx;height:%dpx;">`,
-			img.Base64, left, top, w, h))
+		// sb.WriteString(fmt.Sprintf(
+		// 	`<img src="data:image/png;base64,%s" style="left:%dpx;top:%dpx;width:%dpx;height:%dpx;">`,
+		// 	img.Base64, left, top, w, h))
 	}
 
 	sb.WriteString("</div></body></html>")

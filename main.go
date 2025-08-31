@@ -71,7 +71,9 @@ func main() {
 		}
 	}
 
+	//Need to Fix as Images are coming for all slides
 	images, _ := imagefinder.ExtractImages(r, 6)
+
 	html := helper.BuildSlideHTML(bgURI, boxes, mathBoxes, shapes, images)
 
 	if err := os.WriteFile("slide.html", []byte(html), 0644); err != nil {
