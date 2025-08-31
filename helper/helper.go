@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"pptx2html/imagefinder"
 	mathfinder "pptx2html/math"
 	"pptx2html/shapefinder"
 	"pptx2html/textfinder"
@@ -127,9 +128,10 @@ func runStyle(run textfinder.TextRun) string {
 	styles = append(styles, "padding:0")
 
 	return strings.Join(styles, ";") + ";"
+
 }
 
-func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfinder.MathBox, shapes []shapefinder.ShapeBox) string {
+func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfinder.MathBox, shapes []shapefinder.ShapeBox, images []imagefinder.ImageBox) string {
 	slideW := 1280
 	slideH := 720
 
@@ -145,6 +147,7 @@ func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfi
 	sb.WriteString(".math div{font-size:24px;text-align:center;}")
 	sb.WriteString(".text-box{background:transparent;border:none;}")
 	sb.WriteString(".shape{background:transparent;border:1px solid transparent;}")
+	sb.WriteString(".slide img{position:absolute;}") // for images
 	sb.WriteString("</style></head><body>")
 	sb.WriteString(`<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>`)
 
@@ -158,6 +161,7 @@ func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfi
 			slideW, slideH))
 	}
 
+	// Render math boxes
 	for _, mb := range mathBoxes {
 		left := emuToPx(mb.X)
 		top := emuToPx(mb.Y)
@@ -176,6 +180,7 @@ func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfi
 			left, top, w, h, htmlEscape(mb.Latex)))
 	}
 
+	// Render text boxes
 	for _, tb := range boxes {
 		left := emuToPx(tb.X)
 		top := emuToPx(tb.Y)
@@ -188,13 +193,11 @@ func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfi
 			h = 80
 		}
 
-		// Determine if this is a shape or text box
 		className := "tb text-box"
 		if tb.ShapeName != "" {
 			className = "tb shape"
 		}
 
-		// Build text content with proper styling
 		inner := &strings.Builder{}
 		for _, run := range tb.Runs {
 			style := runStyle(run)
@@ -206,7 +209,6 @@ func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfi
 			}
 		}
 
-		// Enhanced text box styling with background and border
 		boxStyle := fmt.Sprintf("left:%dpx;top:%dpx;width:%dpx;height:%dpx;", left, top, w, h)
 		if tb.BackgroundColor != "" {
 			boxStyle += fmt.Sprintf("background-color:#%s;", tb.BackgroundColor)
@@ -217,14 +219,13 @@ func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfi
 		if tb.ShapeType == "roundRect" {
 			boxStyle += "border-radius:8px;"
 		}
-
-		// Add padding for better text positioning
 		boxStyle += "padding:8px;box-sizing:border-box;"
 
 		sb.WriteString(fmt.Sprintf("<div class='%s' style='%s'>%s</div>",
 			className, boxStyle, inner.String()))
 	}
-	// shapes
+
+	// Render shapes
 	for _, sh := range shapes {
 		left := emuToPx(sh.X)
 		top := emuToPx(sh.Y)
@@ -256,6 +257,24 @@ func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfi
 		sb.WriteString(fmt.Sprintf(
 			`<svg class="shape" style="position:absolute;left:%dpx;top:%dpx;width:%dpx;height:%dpx;">%s</svg>`,
 			left, top, w, h, svg))
+	}
+
+	// Render images
+	for _, img := range images {
+		left := emuToPx(img.X)
+		top := emuToPx(img.Y)
+		w := emuToPx(img.Cx)
+		h := emuToPx(img.Cy)
+		if w == 0 {
+			w = 200
+		}
+		if h == 0 {
+			h = 200
+		}
+
+		sb.WriteString(fmt.Sprintf(
+			`<img src="data:image/png;base64,%s" style="left:%dpx;top:%dpx;width:%dpx;height:%dpx;">`,
+			img.Base64, left, top, w, h))
 	}
 
 	sb.WriteString("</div></body></html>")

@@ -8,6 +8,7 @@ import (
 
 	"pptx2html/bgfinder"
 	"pptx2html/helper"
+	"pptx2html/imagefinder"
 	mathfinder "pptx2html/math"
 	"pptx2html/shapefinder"
 	"pptx2html/textfinder"
@@ -15,7 +16,7 @@ import (
 
 func main() {
 	if len(os.Args) < 3 {
-		fmt.Println("Usage: go run main.go <pptx-file> <slideIndex>")
+		fmt.Println("Usage: go run main.go <pptx-file><slideIndex>")
 		return
 	}
 	pptxFile := os.Args[1]
@@ -69,7 +70,10 @@ func main() {
 				s.Geom, s.X, s.Y, s.Cx, s.Cy, s.Text)
 		}
 	}
-	html := helper.BuildSlideHTML(bgURI, boxes, mathBoxes, shapes)
+
+	images, _ := imagefinder.ExtractImages(r, 6)
+	html := helper.BuildSlideHTML(bgURI, boxes, mathBoxes, shapes, images)
+
 	if err := os.WriteFile("slide.html", []byte(html), 0644); err != nil {
 		fmt.Println("slide.html:", err)
 		return
