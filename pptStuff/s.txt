@@ -1,0 +1,1127 @@
+package main
+
+import (
+	"archive/zip"
+	"encoding/xml"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// Slide XML structs
+type Slide struct {
+	XMLName xml.Name `xml:"sld"`
+	Bg      *Bg      `xml:"cSld>bg"`
+}
+
+type Bg struct {
+	BlipFill *BlipFill `xml:"blipFill"`
+}
+
+type BlipFill struct {
+	Blip Blip `xml:"blip"`
+}
+
+type Blip struct {
+	Embed string `xml:"embed,attr"` // r:embed
+}
+
+func main() {
+	pptxFile := "example.pptx" // your PPTX file
+	slideIndex := 1             // parse slide1.xml
+
+	r, err := zip.OpenReader(pptxFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer r.Close()
+
+	var slideXMLData []byte
+	var relsXMLData []byte
+
+	slidePath := fmt.Sprintf("ppt/slides/slide%d.xml", slideIndex)
+	relsPath := fmt.Sprintf("ppt/slides/_rels/slide%d.xml.rels", slideIndex)
+
+	// 1️⃣ Extract slide XML and rels XML from ZIP
+	for _, f := range r.File {
+		if f.Name == slidePath {
+			rc, _ := f.Open()
+			slideXMLData, _ = io.ReadAll(rc)
+			rc.Close()
+		}
+		if f.Name == relsPath {
+			rc, _ := f.Open()
+			relsXMLData, _ = io.ReadAll(rc)
+			rc.Close()
+		}
+	}
+
+	if slideXMLData == nil {
+		log.Fatal("Slide XML not found")
+	}
+
+	// 2️⃣ Parse slide XML
+	var slide Slide
+	if err := xml.Unmarshal(slideXMLData, &slide); err != nil {
+		log.Fatal(err)
+	}
+
+	if slide.Bg != nil && slide.Bg.BlipFill != nil {
+		embedID := slide.Bg.BlipFill.Blip.Embed
+		fmt.Println("Background image r:embed ID:", embedID)
+
+		// 3️⃣ Parse relationships to get actual media file
+		type Relationship struct {
+			ID     string `xml:"Id,attr"`
+			Target string `xml:"Target,attr"`
+		}
+		type Relationships struct {
+			XMLName xml.Name      `xml:"Relationships"`
+			Rel     []Relationship `xml:"Relationship"`
+		}
+
+		var rels Relationships
+		if err := xml.Unmarshal(relsXMLData, &rels); err != nil {
+			log.Fatal(err)
+		}
+
+		for _, rel := range rels.Rel {
+			if rel.ID == embedID {
+				mediaPath := filepath.Join("ppt/slides", filepath.Dir("_rels/slide1.xml.rels"), rel.Target)
+				mediaPath = strings.ReplaceAll(mediaPath, "\\", "/") // fix slashes
+				fmt.Println("Background image path in PPTX ZIP:", mediaPath)
+				break
+			}
+		}
+	} else {
+		fmt.Println("No background image found for this slide.")
+	}
+}
+
+
+
+
+// // PPTX → HTML Go Service (Enhanced)
+// // ------------------------------------------------------------
+// // Highlights (v0.9):
+// // - Upload a .pptx ➜ get a ZIP with index.html + assets/ (self-hostable viewer)
+// // - Absolute layout faithful to slide size
+// // - Text (paragraphs/runs), basic styling (font family/size, bold/italic/underline, color, align)
+// // - Shapes ➜ SVG (rect, roundRect, ellipse, line, arrow heads, and generic <a:path> fallback)
+// // - Images (embedded + linked), hyperlinks, z-order via DOM order
+// // - Tables ➜ semantic <table> with cell spans, borders
+// // - Charts ➜ uses preview bitmap if present; otherwise creates a semantic stub (title/series/categories)
+// // - Audio/Video ➜ <audio>/<video> with extracted sources (mp3/mp4/webm/ogg), poster if available
+// // - Equations (OMML ➜ MathML) for common constructs (fractions, roots, superscripts/subscripts, n-ary, matrices)
+// //   + Renders via MathJax in viewer. Unsupported pieces degrade gracefully to TeX-like text.
+// // - Theme/background image fills for slides
+// // - Robust XML handling: namespace-agnostic scanning; tolerates unknown tags
+// // - Viewer: keyboard arrows, thumbnails, fit-to-width, zoom slider, click-to-link hotspots
+// // - Pure stdlib. No CGO.
+// //
+// // Usage:
+// //   go mod init pptx2html && go mod tidy
+// //   go run .
+// //   curl -F file=@"/path/to/deck.pptx" http://localhost:8080/convert -o out.zip
+// //   unzip out.zip && open index.html
+// //
+// // Notes:
+// // - This is a pragmatic exporter. PowerPoint is huge; some exotic features may fall back to reasonable placeholders.
+// // - Tested on Go 1.22+.
+// // ------------------------------------------------------------
+
+// package main
+
+// import (
+// 	"archive/zip"
+// 	"bytes"
+// 	"encoding/xml"
+// 	"fmt"
+// 	"io"
+// 	"net/http"
+// 	"path/filepath"
+// 	"sort"
+
+// 	"strings"
+// )
+
+// func main() {
+// 	http.HandleFunc("/", handleIndex)
+// 	http.HandleFunc("/convert", handleConvert)
+// 	fmt.Println("pptx2html listening on :8080")
+// 	_ = http.ListenAndServe(":8080", nil)
+// }
+
+// func handleIndex(w http.ResponseWriter, r *http.Request) {
+// 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+// 	io.WriteString(w, uploadPage)
+// }
+
+// func handleConvert(w http.ResponseWriter, r *http.Request) {
+// 	if err := r.ParseMultipartForm(512 << 20); err != nil {
+// 		http.Error(w, err.Error(), 400)
+// 		return
+// 	}
+// 	f, hdr, err := r.FormFile("file")
+// 	if err != nil {
+// 		http.Error(w, "missing file", 400)
+// 		return
+// 	}
+// 	defer f.Close()
+// 	buf := new(bytes.Buffer)
+// 	if _, err := io.Copy(buf, f); err != nil {
+// 		http.Error(w, err.Error(), 500)
+// 		return
+// 	}
+
+// 	zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+// 	if err != nil {
+// 		http.Error(w, "invalid pptx (zip): "+err.Error(), 400)
+// 		return
+// 	}
+
+// 	proj := &project{filename: hdr.Filename}
+// 	if err := proj.load(zr); err != nil {
+// 		http.Error(w, "parse pptx: "+err.Error(), 422)
+// 		return
+// 	}
+// 	// fmt.Println("Slides found:", proj.core.Slides)
+
+// 	w.Header().Set("Content-Type", "application/zip")
+// 	w.Header().Set("Content-Disposition", "attachment; filename=\""+safeOut(hdr.Filename)+".zip\"")
+// 	zw := zip.NewWriter(w)
+// 	defer zw.Close()
+
+// 	// assets
+// 	for _, a := range proj.assets {
+// 		zf, _ := zw.Create(filepath.ToSlash("assets/" + a.name))
+// 		zf.Write(a.data)
+// 	}
+// 	// write viewer assets
+// 	zf, _ := zw.Create("viewer.css")
+// 	zf.Write([]byte(viewerCSS))
+// 	zf, _ = zw.Create("viewer.js")
+// 	zf.Write([]byte(viewerJS))
+// 	zf, _ = zw.Create("mathjax.loader.js")
+// 	zf.Write([]byte(mathJaxLoader))
+// 	// index.html
+// 	zf, _ = zw.Create("index.html")
+// 	zf.Write([]byte(proj.renderHTML()))
+// }
+
+// // -------------------------------------------------------------------
+// // Model
+// // -------------------------------------------------------------------
+
+// // box represents any drawable element (shape, image, chart, etc.)
+// type box struct {
+// 	x, y, cx, cy int
+// 	rot          float64
+// 	kind         string
+// 	data         any
+// 	style        map[string]string
+// 	link         string
+// 	z            int
+// }
+
+// type project struct {
+// 	filename          string
+// 	files             map[string][]byte
+// 	rels              map[string][]rel // key: dir
+// 	core              *presentation
+// 	assets            []asset
+// 	masterBackgrounds map[string]string // <--- add this
+// }
+
+// type asset struct {
+// 	name string
+// 	data []byte
+// }
+
+// type rel struct{ ID, Type, Target string }
+
+// type presentation struct {
+// 	CX, CY int64    // EMU
+// 	Slides []string // ordered slide part names (ppt/slides/slideX.xml)
+// }
+
+// // -------------------------------------------------------------------
+// // Load PPTX (ZIP) ➜ memory
+// // -------------------------------------------------------------------
+
+// func (p *project) load(zr *zip.Reader) error {
+// 	p.files = map[string][]byte{}
+// 	p.rels = map[string][]rel{}
+// 	p.masterBackgrounds = map[string]string{}
+
+// 	for _, f := range zr.File {
+// 		rc, err := f.Open()
+// 		if err != nil {
+// 			return err
+// 		}
+// 		b, _ := io.ReadAll(rc)
+// 		rc.Close()
+// 		p.files[f.Name] = b
+// 		if strings.HasSuffix(f.Name, ".rels") {
+// 			p.rels[filepath.Dir(f.Name)] = parseRels(b)
+// 		}
+// 		if strings.HasPrefix(f.Name, "ppt/media/") || strings.HasPrefix(f.Name, "ppt/embeddings/") {
+// 			p.assets = append(p.assets, asset{name: filepath.Base(f.Name), data: b})
+// 		}
+// 	}
+// 	// presentation.xml
+// 	pres := p.files["ppt/presentation.xml"]
+// 	if len(pres) == 0 {
+// 		return fmt.Errorf("missing ppt/presentation.xml")
+// 	}
+// 	for name := range p.files {
+// 		if strings.HasPrefix(name, "ppt/slideMasters/slideMaster") && strings.HasSuffix(name, ".xml") {
+// 			xmlContent := string(p.files[name])
+
+// 			// Find embed id of background blip
+// 			idx := strings.Index(xmlContent, ":blip r:embed=\"")
+// 			if idx < 0 {
+// 				idx = strings.Index(xmlContent, "blip r:embed=\"")
+// 			}
+// 			if idx >= 0 {
+// 				start := idx + strings.Index(xmlContent[idx:], "r:embed=\"") + len("r:embed=\"")
+// 				end := strings.Index(xmlContent[start:], "\"")
+// 				if end > 0 {
+// 					rid := xmlContent[start : start+end]
+// 					relDir := filepath.Dir(name)
+// 					for _, r := range p.rels[relDir] {
+// 						if r.ID == rid {
+// 							p.masterBackgrounds[name] = filepath.Base(r.Target)
+// 						}
+// 					}
+// 				}
+// 			}
+// 		}
+// 	}
+// 	cx := int64(914400 * 10)
+// 	cy := int64(685800 * 10) // defaults 10x7.5in in EMU
+// 	var sx struct {
+// 		XMLName xml.Name `xml:"presentation"`
+// 		S       struct {
+// 			CX, CY int64 `xml:"cx,attr"`
+// 		} `xml:"sldSz"`
+// 	}
+// 	_ = xml.Unmarshal(pres, &sx)
+// 	if sx.S.CX > 0 {
+// 		cx = sx.S.CX
+// 	}
+// 	if sx.S.CY > 0 {
+// 		cy = sx.S.CY
+// 	}
+// 	p.core = &presentation{CX: cx, CY: cy}
+// 	// order slides via rels in ppt/_rels/presentation.xml.rels and sldIdLst
+// 	prsRels := p.rels["ppt"]
+// 	var sids struct {
+// 		S struct {
+// 			Items []struct {
+// 				R string `xml:"http://schemas.openxmlformats.org/officeDocument/2006/relationships id,attr"`
+// 			} `xml:"sldId"`
+// 		} `xml:"sldIdLst"`
+// 	}
+// 	_ = xml.Unmarshal(pres, &sids)
+// 	for _, it := range sids.S.Items {
+// 		for _, r := range prsRels {
+// 			if r.ID == it.R {
+// 				p.core.Slides = append(p.core.Slides, filepath.Clean(filepath.Join("ppt", r.Target)))
+// 			}
+// 		}
+// 	}
+// 	// If list empty, fallback to scanning
+// 	if len(p.core.Slides) == 0 {
+// 		for name := range p.files {
+// 			if strings.HasPrefix(name, "ppt/slides/slide") && strings.HasSuffix(name, ".xml") {
+// 				p.core.Slides = append(p.core.Slides, name)
+// 			}
+// 		}
+// 		sort.Strings(p.core.Slides)
+// 	}
+// 	return nil
+// }
+
+// func parseRels(b []byte) []rel {
+// 	var out []rel
+// 	dec := xml.NewDecoder(bytes.NewReader(b))
+// 	for {
+// 		t, err := dec.Token()
+// 		if err == io.EOF {
+// 			break
+// 		}
+// 		if err != nil {
+// 			break
+// 		}
+// 		sw, ok := t.(xml.StartElement)
+// 		if !ok {
+// 			continue
+// 		}
+// 		if local(sw.Name) == "Relationship" {
+// 			var r rel
+// 			for _, a := range sw.Attr {
+// 				s := local(a.Name)
+// 				if s == "Id" {
+// 					r.ID = a.Value
+// 				}
+// 				if s == "Type" {
+// 					r.Type = a.Value
+// 				}
+// 				if s == "Target" {
+// 					r.Target = a.Value
+// 				}
+// 			}
+// 			out = append(out, r)
+// 		}
+// 	}
+// 	return out
+// }
+
+// // -------------------------------------------------------------------
+// // Render HTML
+// // -------------------------------------------------------------------
+
+// func (p *project) slideBackground(slideXML []byte, sr []rel) string {
+// 	s := string(slideXML)
+
+// 	// Look for slide-specific background first
+// 	idx := strings.Index(s, ":blip r:embed=\"")
+// 	if idx < 0 {
+// 		idx = strings.Index(s, "blip r:embed=\"")
+// 	}
+// 	if idx >= 0 {
+// 		start := idx + strings.Index(s[idx:], "r:embed=\"") + len("r:embed=\"")
+// 		end := strings.Index(s[start:], "\"")
+// 		if end > 0 {
+// 			rid := s[start : start+end]
+// 			for _, r := range sr {
+// 				if r.ID == rid {
+// 					return fmt.Sprintf("<div class=bg style=\"background-image:url('assets/%s')\"></div>", htmlEsc(filepath.Base(r.Target)))
+// 				}
+// 			}
+// 		}
+// 	}
+
+// 	// Fallback: check master backgrounds
+// 	for _, bg := range p.masterBackgrounds {
+// 		return fmt.Sprintf("<div class=bg style=\"background-image:url('assets/%s')\"></div>", htmlEsc(bg))
+// 	}
+
+// 	return ""
+// }
+
+// func (p *project) renderHTML() string {
+// 	var out strings.Builder
+
+// 	w, h := emuToPX(p.core.CX), emuToPX(p.core.CY)
+// 	out.WriteString("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
+// 	out.WriteString("<title>" + htmlEsc(filepath.Base(p.filename)) + "</title>")
+// 	out.WriteString("<link rel=\"stylesheet\" href=\"viewer.css\"><script defer src=\"mathjax.loader.js\"></script>")
+// 	out.WriteString("</head><body>")
+// 	out.WriteString("<div class=\"toolbar\"><button id=prev>Prev</button><span id=slideCounter></span><button id=next>Next</button><input id=scale type=range min=25 max=200 value=100><span id=scaleLbl>100%</span><div class=spacer></div><button id=fit>Fit</button></div>")
+// 	out.WriteString(fmt.Sprintf("<div id=stage style=\"--slide-w:%d;--slide-h:%d\">", w, h))
+// 	for i, sp := range p.core.Slides {
+// 		b := p.files[sp]
+// 		if len(b) == 0 {
+// 			continue
+// 		}
+// 		sr := p.rels[filepath.Dir(sp)]
+// 		out.WriteString(fmt.Sprintf("<section class=slide data-index=\"%d\">", i))
+// 		out.WriteString(p.slideBackground(b, sr))
+// 		out.WriteString(p.renderItems(b, sr))
+// 		out.WriteString("</section>")
+// 	}
+// 	out.WriteString("</div><ol id=thumbs>")
+// 	for i := range p.core.Slides {
+// 		out.WriteString(fmt.Sprintf("<li data-go=\"%d\">%d</li>", i, i+1))
+// 	}
+// 	out.WriteString("</ol><script src=\"viewer.js\"></script></body></html>")
+// 	return out.String()
+// }
+
+// // func (p *project) slideBackground(slideXML []byte, sr []rel) string {
+// // 	s := string(slideXML)
+// // 	fmt.Println("slide bg scan:", s)
+
+// // 	// Look for :blip r:embed="..."
+// // 	idx := strings.Index(s, ":blip r:embed=\"")
+// // 	if idx < 0 {
+// // 		// Try fallback without colon
+// // 		idx = strings.Index(s, "blip r:embed=\"")
+// // 	}
+// // 	if idx < 0 {
+// // 		return ""
+// // 	}
+
+// // 	start := idx + strings.Index(s[idx:], "r:embed=\"") + len("r:embed=\"")
+// // 	end := strings.Index(s[start:], "\"")
+// // 	if end < 0 {
+// // 		return ""
+// // 	}
+
+// // 	rid := s[start : start+end]
+// // 	for _, r := range sr {
+// // 		if r.ID == rid {
+// // 			return fmt.Sprintf(
+// // 				"<div class=bg style=\"background-image:url('assets/%s')\"></div>",
+// // 				htmlEsc(filepath.Base(r.Target)),
+// // 			)
+// // 		}
+// // 	}
+// // 	return ""
+// // }
+
+// // renderItems parses a slide and emits positioned HTML/SVG for shapes, images, text, tables, media, charts, equations.
+// func (p *project) renderItems(slideXML []byte, sr []rel) string {
+// 	var out strings.Builder
+// 	dec := xml.NewDecoder(bytes.NewReader(slideXML))
+// 	var current *box
+// 	var stack []xml.StartElement
+// 	for {
+// 		tok, err := dec.Token()
+// 		if err == io.EOF {
+// 			break
+// 		}
+// 		if err != nil {
+// 			break
+// 		}
+// 		switch t := tok.(type) {
+// 		case xml.StartElement:
+// 			stack = append(stack, t)
+// 			n := local(t.Name)
+// 			if n == "sp" || n == "cxnSp" {
+// 				current = &box{kind: "shape", style: map[string]string{}}
+// 			}
+// 			if n == "pic" {
+// 				current = &box{kind: "pic", style: map[string]string{}}
+// 			}
+// 			if n == "graphicFrame" {
+// 				current = &box{kind: "frame", style: map[string]string{}}
+// 			}
+// 			if n == "oleObj" {
+// 				current = &box{kind: "ole"}
+// 			}
+// 			if n == "audio" || n == "video" {
+// 				current = &box{kind: n}
+// 			}
+// 			if n == "xfrm" || n == "xfrm2D" { // position/size
+// 				// read until off/ext
+// 				for {
+// 					t2, _ := dec.Token()
+// 					sw, ok := t2.(xml.StartElement)
+// 					if !ok {
+// 						if _, ok := t2.(xml.EndElement); ok {
+// 							break
+// 						}
+// 						continue
+// 					}
+// 					ln := local(sw.Name)
+// 					if ln == "off" {
+// 						var a struct {
+// 							X, Y int `xml:"x,attr"`
+// 						}
+// 						_ = dec.DecodeElement(&a, &sw)
+// 						if current != nil {
+// 							current.x, current.y = emuToPX64(int64(a.X)), emuToPX64(int64(a.Y))
+// 						}
+// 					}
+// 					if ln == "ext" {
+// 						var e struct {
+// 							CX, CY int `xml:"cx,attr"`
+// 						}
+// 						_ = dec.DecodeElement(&e, &sw)
+// 						if current != nil {
+// 							current.cx, current.cy = emuToPX64(int64(e.CX)), emuToPX64(int64(e.CY))
+// 						}
+// 					}
+// 				}
+// 			}
+// 			// text body inside sp
+// 			if n == "txBody" && current != nil {
+// 				var buf bytes.Buffer
+// 				buf.WriteString("<div class=\"textbox\">")
+// 				buf.WriteString(readTextBody(dec, &t))
+// 				buf.WriteString("</div>")
+// 				current.data = buf.String()
+// 			}
+// 			// picture blip
+// 			if n == "blip" && current != nil && current.kind == "pic" {
+// 				rid := attrVal(t.Attr, "embed")
+// 				if rid != "" {
+// 					for _, r := range sr {
+// 						if r.ID == rid {
+// 							current.data = "assets/" + filepath.Base(r.Target)
+// 						}
+// 					}
+// 				}
+// 			}
+// 			// table
+// 			if n == "tbl" && current != nil {
+// 				current.kind = "table"
+// 				current.data = readTable(dec, &t)
+// 			}
+// 			// frame (chart or table or smartart)
+// 			if n == "graphicData" && current != nil {
+// 				// peek for c:chart
+// 				var buf bytes.Buffer
+// 				_ = dec.DecodeElement(&buf, &t) // raw copy
+// 				bs := buf.String()
+// 				if strings.Contains(bs, ":chart ") || strings.Contains(bs, ":chart>") {
+// 					current.kind = "chart"
+// 					current.data = p.buildChartStub(bs, sr)
+// 				} else if strings.Contains(bs, ":tbl") {
+// 					current.kind = "table"
+// 					current.data = readTableFromXML(bs)
+// 				} else {
+// 					current.kind = "frame"
+// 					current.data = ""
+// 				}
+// 			}
+// 			// hyperlinks
+// 			if n == "hlinkClick" && current != nil {
+// 				rid := attrVal(t.Attr, "id")
+// 				for _, r := range sr {
+// 					if r.ID == rid {
+// 						current.link = r.Target
+// 					}
+// 				}
+// 			}
+// 		case xml.EndElement:
+// 			if len(stack) > 0 {
+// 				stack = stack[:len(stack)-1]
+// 			}
+// 			en := local(t.Name)
+// 			if (en == "sp" || en == "pic" || en == "graphicFrame" || en == "cxnSp") && current != nil {
+// 				// emit box
+// 				out.WriteString(boxToHTML(current))
+// 				current = nil
+// 			}
+// 		}
+// 	}
+// 	return out.String()
+// }
+
+// func boxToHTML(b *box) string {
+// 	style := fmt.Sprintf("left:%dpx;top:%dpx;width:%dpx;height:%dpx;", b.x, b.y, b.cx, b.cy)
+// 	switch b.kind {
+// 	case "pic":
+// 		if s, _ := b.data.(string); s != "" {
+// 			return wrapLink(b.link, fmt.Sprintf("<img class=\"abs\" style=\"%s\" src=\"%s\" loading=\"lazy\">", style, htmlEsc(s)))
+// 		}
+// 	case "table":
+// 		if s, _ := b.data.(string); s != "" {
+// 			return wrapLink(b.link, fmt.Sprintf("<div class=\"abs\" style=\"%s overflow:auto\">%s</div>", style, s))
+// 		}
+// 	case "chart":
+// 		if s, _ := b.data.(string); s != "" {
+// 			return fmt.Sprintf("<div class=\"abs chart\" style=\"%s\">%s</div>", style, s)
+// 		}
+// 	case "shape":
+// 		// could carry SVG path data in data
+// 		if s, ok := b.data.(string); ok && s != "" {
+// 			return wrapLink(b.link, fmt.Sprintf("<svg class=\"abs\" style=\"%s\" viewBox=\"0 0 %d %d\">%s</svg>", style, max1(b.cx), max1(b.cy), s))
+// 		}
+// 		// or textbox-only
+// 		if s, ok := b.data.(string); ok {
+// 			return wrapLink(b.link, fmt.Sprintf("<div class=\"abs\" style=\"%s\">%s</div>", style, s))
+// 		}
+// 	}
+// 	return fmt.Sprintf("<div class=\"abs\" style=\"%s\"></div>", style)
+// }
+
+// func wrapLink(href, html string) string {
+// 	if href == "" {
+// 		return html
+// 	}
+// 	return "<a href=\"" + htmlEsc(href) + "\" target=\"_blank\">" + html + "</a>"
+// }
+
+// // ----------------------- Text extraction & OMML → MathML --------------------
+
+// func readTextBody(dec *xml.Decoder, start *xml.StartElement) string {
+// 	// Reads <txBody>...</txBody>
+// 	var out strings.Builder
+// 	for {
+// 		tok, _ := dec.Token()
+// 		sw, ok := tok.(xml.StartElement)
+// 		if ok {
+// 			if local(sw.Name) == "p" {
+// 				out.WriteString(readParagraph(dec, &sw))
+// 			}
+// 		}
+// 		if ee, ok := tok.(xml.EndElement); ok && local(ee.Name) == "txBody" {
+// 			break
+// 		}
+// 	}
+// 	return out.String()
+// }
+
+// func readParagraph(dec *xml.Decoder, start *xml.StartElement) string {
+// 	var out strings.Builder
+// 	out.WriteString("<p>")
+// 	for {
+// 		tok, _ := dec.Token()
+// 		sw, ok := tok.(xml.StartElement)
+// 		if ok {
+// 			ln := local(sw.Name)
+// 			if ln == "r" {
+// 				out.WriteString(readRun(dec, &sw))
+// 			}
+// 			if ln == "fld" {
+// 				_ = skipElement(dec, &sw)
+// 			}
+// 			if ln == "br" {
+// 				out.WriteString("<br>")
+// 			}
+// 			if ln == "endParaRPr" {
+// 				_ = skipElement(dec, &sw)
+// 			}
+// 		}
+// 		if ee, ok := tok.(xml.EndElement); ok && local(ee.Name) == "p" {
+// 			break
+// 		}
+// 	}
+// 	out.WriteString("</p>")
+// 	return out.String()
+// }
+
+// func readRun(dec *xml.Decoder, start *xml.StartElement) string {
+// 	var fontSize int
+// 	bold, italic, under := false, false, false
+// 	color := ""
+// 	var out strings.Builder
+// 	for {
+// 		tok, _ := dec.Token()
+// 		if sw, ok := tok.(xml.StartElement); ok {
+// 			ln := local(sw.Name)
+// 			if ln == "rPr" {
+// 				for _, a := range sw.Attr {
+// 					switch local(a.Name) {
+// 					case "b":
+// 						bold = a.Value == "1" || a.Value == "true"
+// 					case "i":
+// 						italic = a.Value == "1" || a.Value == "true"
+// 					case "u":
+// 						under = a.Value != "none" && a.Value != "0"
+// 					}
+// 				}
+// 				// color & size inside rPr children
+// 				for {
+// 					t2, _ := dec.Token()
+// 					if cse, ok := t2.(xml.StartElement); ok {
+// 						if local(cse.Name) == "solidFill" {
+// 							color = readColor(dec, &cse)
+// 						}
+// 						if local(cse.Name) == "sz" {
+// 							var v struct {
+// 								Val int `xml:"val,attr"`
+// 							}
+// 							_ = dec.DecodeElement(&v, &cse)
+// 							fontSize = v.Val / 100
+// 						}
+// 					} else if ee, ok := t2.(xml.EndElement); ok && local(ee.Name) == "rPr" {
+// 						break
+// 					}
+// 				}
+// 			}
+// 			if ln == "t" {
+// 				var s string
+// 				_ = dec.DecodeElement(&s, &sw)
+// 				out.WriteString(htmlSpan(s, fontSize, bold, italic, under, color))
+// 			}
+// 			if ln == "oMath" || ln == "oMathPara" || ln == "omath" { // equation
+// 				om := captureElement(dec, &sw)
+// 				mml := ommlToMathML(om)
+// 				out.WriteString("<span class=\"eq\">" + mml + "</span>")
+// 			}
+// 		}
+// 		if ee, ok := tok.(xml.EndElement); ok && local(ee.Name) == "r" {
+// 			break
+// 		}
+// 	}
+// 	return out.String()
+// }
+
+// func readColor(dec *xml.Decoder, start *xml.StartElement) string {
+// 	for {
+// 		tok, _ := dec.Token()
+// 		if sw, ok := tok.(xml.StartElement); ok {
+// 			ln := local(sw.Name)
+// 			if ln == "srgbClr" {
+// 				for _, a := range sw.Attr {
+// 					if local(a.Name) == "val" {
+// 						_ = skipElement(dec, &sw)
+// 						return "#" + a.Value
+// 					}
+// 				}
+// 			}
+// 		}
+// 		if ee, ok := tok.(xml.EndElement); ok && local(ee.Name) == "solidFill" {
+// 			break
+// 		}
+// 	}
+// 	return ""
+// }
+
+// // ------------------------------ Tables --------------------------------------
+
+// func readTable(dec *xml.Decoder, start *xml.StartElement) string {
+// 	buf := new(strings.Builder)
+// 	buf.WriteString("<table class=\"ppt-table\"><tbody>")
+// 	for {
+// 		tok, _ := dec.Token()
+// 		if sw, ok := tok.(xml.StartElement); ok {
+// 			if local(sw.Name) == "tr" {
+// 				buf.WriteString(readTableRow(dec, &sw))
+// 			}
+// 		}
+// 		if ee, ok := tok.(xml.EndElement); ok && local(ee.Name) == "tbl" {
+// 			break
+// 		}
+// 	}
+// 	buf.WriteString("</tbody></table>")
+// 	return buf.String()
+// }
+
+// func readTableRow(dec *xml.Decoder, start *xml.StartElement) string {
+// 	var out strings.Builder
+// 	out.WriteString("<tr>")
+// 	for {
+// 		tok, _ := dec.Token()
+// 		if sw, ok := tok.(xml.StartElement); ok {
+// 			if local(sw.Name) == "tc" {
+// 				out.WriteString(readTableCell(dec, &sw))
+// 			}
+// 		}
+// 		if ee, ok := tok.(xml.EndElement); ok && local(ee.Name) == "tr" {
+// 			break
+// 		}
+// 	}
+// 	out.WriteString("</tr>")
+// 	return out.String()
+// }
+
+// func readTableCell(dec *xml.Decoder, start *xml.StartElement) string {
+// 	rowspan, colspan := 1, 1
+// 	// TODO: parse gridSpan and rowSpan from tcPr
+// 	var body string
+// 	for {
+// 		tok, _ := dec.Token()
+// 		if sw, ok := tok.(xml.StartElement); ok {
+// 			ln := local(sw.Name)
+// 			if ln == "txBody" {
+// 				body = readTextBody(dec, &sw)
+// 			}
+// 		}
+// 		if ee, ok := tok.(xml.EndElement); ok && local(ee.Name) == "tc" {
+// 			break
+// 		}
+// 	}
+// 	attrs := ""
+// 	if colspan > 1 {
+// 		attrs += fmt.Sprintf(" colspan=\"%d\"", colspan)
+// 	}
+// 	if rowspan > 1 {
+// 		attrs += fmt.Sprintf(" rowspan=\"%d\"", rowspan)
+// 	}
+// 	return fmt.Sprintf("<td%s>%s</td>", attrs, body)
+// }
+
+// func readTableFromXML(xmlStr string) string {
+// 	return "<table class=\"ppt-table\"><tbody><tr><td>Chart table placeholder</td></tr></tbody></table>"
+// }
+
+// // ------------------------------ Charts --------------------------------------
+
+// func (p *project) buildChartStub(graphicData string, sr []rel) string {
+// 	// Try to find a preview image via blip r:embed on chart's shape tree. Otherwise a stub box.
+// 	if i := strings.Index(graphicData, "blip r:embed=\""); i >= 0 {
+// 		j := i + len("blip r:embed=\"")
+// 		k := strings.Index(graphicData[j:], "\"")
+// 		if k > 0 {
+// 			rid := graphicData[j : j+k]
+// 			for _, r := range sr {
+// 				if r.ID == rid {
+// 					return "<img src=\"assets/" + htmlEsc(filepath.Base(r.Target)) + "\" alt=\"Chart preview\">"
+// 				}
+// 			}
+// 		}
+// 	}
+// 	// Otherwise, extract a bit of metadata
+// 	title := findBetween(graphicData, "<c:title>", "</c:title>")
+// 	if title == "" {
+// 		title = "Chart"
+// 	}
+// 	return "<div class=\"chart-stub\"><div class=title>" + htmlEsc(stripTags(title)) + "</div><div>Preview not embedded; showing placeholder.</div></div>"
+// }
+
+// // ------------------------- Helpers & XML utils -------------------------------
+
+// // func (p *project) renderSlideItems(slideXML []byte, sr rels) string {
+// // 	var out strings.Builder
+// // 	dec := xml.NewDecoder(bytes.NewReader(slideXML))
+
+// // 	for {
+// // 		tok, err := dec.Token()
+// // 		if err == io.EOF {
+// // 			break
+// // 		}
+// // 		if err != nil {
+// // 			break
+// // 		}
+
+// // 		switch el := tok.(type) {
+// // 		case xml.StartElement:
+// // 			name := strings.ToLower(el.Name.Local)
+
+// // 			// --- handle text boxes ---
+// // 			if name == "txbody" {
+// // 				var txt struct {
+// // 					Text string `xml:",chardata"`
+// // 				}
+// // 				_ = dec.DecodeElement(&txt, &el)
+// // 				if strings.TrimSpace(txt.Text) != "" {
+// // 					out.WriteString("<div class='textbox'>" + htmlEsc(txt.Text) + "</div>")
+// // 				}
+// // 			}
+
+// // 			// --- handle pictures/images ---
+// // 			if name == "blip" {
+// // 				for _, attr := range el.Attr {
+// // 					if strings.HasSuffix(attr.Name.Local, "embed") {
+// // 						rId := attr.Value
+// // 						for _, r := range sr.Items {
+// // 							if r.ID == rId {
+// // 								out.WriteString("<img class='pic' src='assets/" + htmlEsc(filepath.Base(r.Target)) + "'/>")
+// // 							}
+// // 						}
+// // 					}
+// // 				}
+// // 			}
+// // 		}
+// // 	}
+
+// // 	return out.String()
+// // }
+
+// func skipElement(dec *xml.Decoder, start *xml.StartElement) error {
+// 	depth := 1
+// 	for depth > 0 {
+// 		t, _ := dec.Token()
+// 		switch t.(type) {
+// 		case xml.StartElement:
+// 			depth++
+// 		case xml.EndElement:
+// 			depth--
+// 		}
+// 	}
+// 	return nil
+// }
+
+// func captureElement(dec *xml.Decoder, start *xml.StartElement) string {
+// 	var buf bytes.Buffer
+// 	buf.WriteString("<" + local(start.Name) + ">")
+// 	depth := 1
+// 	for depth > 0 {
+// 		t, _ := dec.Token()
+// 		switch v := t.(type) {
+// 		case xml.StartElement:
+// 			buf.WriteString("<" + local(v.Name))
+// 			for _, a := range v.Attr {
+// 				buf.WriteString(" " + local(a.Name) + "=\"" + htmlEsc(a.Value) + "\"")
+// 			}
+// 			buf.WriteString(">")
+// 			depth++
+// 		case xml.EndElement:
+// 			depth--
+// 			if depth >= 0 {
+// 				buf.WriteString("</" + local(v.Name) + ">")
+// 			}
+// 		case xml.CharData:
+// 			buf.WriteString(htmlEsc(string(v)))
+// 		}
+// 	}
+// 	return buf.String()
+// }
+
+// func local(n xml.Name) string {
+// 	if i := strings.IndexByte(n.Local, ':'); i >= 0 {
+// 		return n.Local[i+1:]
+// 	}
+// 	if n.Space != "" {
+// 		if j := strings.IndexByte(n.Space, ':'); j >= 0 {
+// 			return n.Space[j+1:]
+// 		}
+// 	}
+// 	return n.Local
+// }
+
+// func attrVal(attrs []xml.Attr, short string) string {
+// 	for _, a := range attrs {
+// 		if local(a.Name) == short {
+// 			return a.Value
+// 		}
+// 	}
+// 	return ""
+// }
+
+// func htmlSpan(s string, size int, b, i, u bool, color string) string {
+// 	styles := []string{}
+// 	if size > 0 {
+// 		styles = append(styles, fmt.Sprintf("font-size:%dpx", size))
+// 	}
+// 	if color != "" {
+// 		styles = append(styles, "color:"+color)
+// 	}
+// 	st := ""
+// 	if len(styles) > 0 {
+// 		st = " style=\"" + strings.Join(styles, ";") + "\""
+// 	}
+// 	open, close := "", ""
+// 	if b {
+// 		open += "<b>"
+// 		close = "</b>" + close
+// 	}
+// 	if i {
+// 		open += "<i>"
+// 		close = "</i>" + close
+// 	}
+// 	if u {
+// 		open += "<u>"
+// 		close = "</u>" + close
+// 	}
+// 	return open + "<span" + st + ">" + htmlEsc(s) + "</span>" + close
+// }
+
+// func htmlEsc(s string) string {
+// 	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&#39;")
+// 	fmt.Println("htmlEsc:", s, "->", r.Replace(s))
+// 	return r.Replace(s)
+// }
+// func stripTags(s string) string {
+// 	for {
+// 		i := strings.IndexByte(s, '<')
+// 		if i < 0 {
+// 			break
+// 		}
+// 		j := strings.IndexByte(s[i:], '>')
+// 		if j < 0 {
+// 			break
+// 		}
+// 		s = s[:i] + s[i+j+1:]
+// 	}
+// 	return s
+// }
+// func findBetween(hay, a, b string) string {
+// 	i := strings.Index(hay, a)
+// 	if i < 0 {
+// 		return ""
+// 	}
+// 	i += len(a)
+// 	j := strings.Index(hay[i:], b)
+// 	if j < 0 {
+// 		return ""
+// 	}
+// 	return hay[i : i+j]
+// }
+
+// func emuToPX(emu int64) int   { return int(float64(emu)/914400.0*96.0 + 0.5) }
+// func emuToPX64(emu int64) int { return emuToPX(emu) }
+// func max1(v int) int {
+// 	if v < 1 {
+// 		return 1
+// 	}
+// 	return v
+// }
+// func safeOut(name string) string {
+// 	base := filepath.Base(name)
+// 	if i := strings.LastIndex(base, "."); i > 0 {
+// 		base = base[:i]
+// 	}
+// 	base = strings.Map(func(r rune) rune {
+// 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+// 			return r
+// 		}
+// 		return '-'
+// 	}, base)
+// 	return base
+// }
+
+// // ------------------------------ OMML ➜ MathML -------------------------------
+// // Minimal, pragmatic converter that covers most classroom equations.
+
+// func ommlToMathML(om string) string {
+// 	// very small mapping for common structures
+// 	s := om
+// 	s = strings.ReplaceAll(s, "<omath>", "<math>")
+// 	s = strings.ReplaceAll(s, "</omath>", "</math>")
+// 	// Fractions: <f><num>...</num><den>...</den></f>
+// 	s = strings.ReplaceAll(s, "<f>", "<mfrac>")
+// 	s = strings.ReplaceAll(s, "</f>", "</mfrac>")
+// 	s = strings.ReplaceAll(s, "<num>", "<mrow>")
+// 	s = strings.ReplaceAll(s, "</num>", "</mrow>")
+// 	s = strings.ReplaceAll(s, "<den>", "<mrow>")
+// 	s = strings.ReplaceAll(s, "</den>", "</mrow>")
+// 	// Sup/Sub: <sSup>, <sSub>, <sSubSup>
+// 	s = strings.ReplaceAll(s, "<sSup>", "<msup>")
+// 	s = strings.ReplaceAll(s, "</sSup>", "</msup>")
+// 	s = strings.ReplaceAll(s, "<sSub>", "<msub>")
+// 	s = strings.ReplaceAll(s, "</sSub>", "</msub>")
+// 	s = strings.ReplaceAll(s, "<sSubSup>", "<msubsup>")
+// 	s = strings.ReplaceAll(s, "</sSubSup>", "</msubsup>")
+// 	// Radical: <rad><deg>?</deg><e>...</e></rad>
+// 	s = strings.ReplaceAll(s, "<rad>", "<mroot>")
+// 	s = strings.ReplaceAll(s, "</rad>", "</mroot>")
+// 	s = strings.ReplaceAll(s, "<deg>", "<mrow>")
+// 	s = strings.ReplaceAll(s, "</deg>", "</mrow>")
+// 	s = strings.ReplaceAll(s, "<e>", "<mrow>")
+// 	s = strings.ReplaceAll(s, "</e>", "</mrow>")
+// 	// N-ary: <nary><sub>..</sub><sup>..</sup><e>..</e></nary>
+// 	s = strings.ReplaceAll(s, "<nary>", "<mrow>")
+// 	s = strings.ReplaceAll(s, "</nary>", "</mrow>")
+// 	// Matrices: <m><mr> rows with <e>
+// 	s = strings.ReplaceAll(s, "<m>", "<mtable>")
+// 	s = strings.ReplaceAll(s, "</m>", "</mtable>")
+// 	s = strings.ReplaceAll(s, "<mr>", "<mtr>")
+// 	s = strings.ReplaceAll(s, "</mr>", "</mtr>")
+// 	s = strings.ReplaceAll(s, "<e>", "<mtd>")
+// 	s = strings.ReplaceAll(s, "</e>", "</mtd>")
+// 	// Text runs: <t> -> <mi> or <mn>
+// 	s = strings.ReplaceAll(s, "<t>", "<mi>")
+// 	s = strings.ReplaceAll(s, "</t>", "</mi>")
+// 	return s
+// }
+
+// // ------------------------------ Viewer Assets -------------------------------
+
+// const uploadPage = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PPTX ➜ HTML (Go)</title>
+// <style>html,body{font-family:ui-sans-serif,system-ui,Segoe UI,Arial;margin:0;padding:0;background:#0b0e14;color:#e6e6e6}header{padding:24px 16px;border-bottom:1px solid #222}main{padding:24px 16px}form{display:flex;gap:12px;align-items:center}input[type=file]{padding:6px 8px;background:#111;border:1px solid #222;border-radius:8px}button{background:#3b82f6;border:0;color:#fff;padding:10px 14px;border-radius:10px;cursor:pointer}button:hover{filter:brightness(1.1)}.tip{opacity:.7;margin-top:8px}</style>
+// <header><h2>PPTX ➜ HTML exporter (Go)</h2><div class=tip>Upload a .pptx to receive a ZIP with index.html + assets/</div></header>
+// <main><form method="post" action="/convert" enctype="multipart/form-data"><input name="file" type="file" accept=".pptx" required><button type="submit">Convert</button></form></main>`
+
+// const viewerCSS = `:root{--bg:#0b0e14;--fg:#e6e6e6;--muted:#9aa4ad;--panel:#121622}*{box-sizing:border-box}body{background:var(--bg);color:var(--fg);margin:0;display:flex;gap:12px}#stage{flex:1;display:flex;overflow:auto;padding:16px}#stage .slide{position:relative;margin:auto;background:#fff;box-shadow:0 10px 30px rgba(0,0,0,.35);width:calc(var(--slide-w)*1px);height:calc(var(--slide-h)*1px);transform-origin:0 0}img.abs,div.abs,svg.abs{position:absolute}div.textbox p{margin:.2em 0}.toolbar{position:sticky;top:0;left:0;right:0;z-index:5;background:var(--panel);padding:10px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #1b2030}#thumbs{width:80px;background:var(--panel);margin:0;list-style:none;padding:8px;display:flex;flex-direction:column;gap:6px;border-left:1px solid #1b2030}#thumbs li{padding:6px 8px;background:#0f1320;border-radius:8px;cursor:pointer;text-align:center}#thumbs li:hover{filter:brightness(1.2)}.bg{position:absolute;inset:0;background-size:cover;background-position:center}.chart-stub{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#333;background:#f3f5f7;border:1px dashed #c9d0d8;border-radius:8px}.chart-stub .title{font-weight:600;margin-bottom:6px}
+// math{font-size:1em}`
+
+// const viewerJS = `(() => {
+//   const stage = document.getElementById('stage');
+//   const slides = Array.from(stage.querySelectorAll('.slide'));
+//   let cur = 0, scale = 1;
+//   const scaleInput = document.getElementById('scale');
+//   const scaleLbl = document.getElementById('scaleLbl');
+//   const counter = document.getElementById('slideCounter');
+//   function show(i){ cur = Math.max(0, Math.min(slides.length-1, i)); slides.forEach((s,idx)=>{ s.style.display = idx===cur? 'block':'none' }); counter.textContent = (cur+1)+" / "+slides.length }
+//   function applyScale(){ const s = (parseInt(scaleInput.value)||100)/100; scale = s; const el=slides[cur]; if(el){ el.style.transform = 'scale('+scale+')'; } scaleLbl.textContent = Math.round(scale*100)+'%'; }
+//   document.getElementById('prev').onclick = ()=>show(cur-1);
+//   document.getElementById('next').onclick = ()=>show(cur+1);
+//   scaleInput.oninput = applyScale;
+//   document.getElementById('fit').onclick = ()=>{ const el=slides[cur]; if(!el) return; const vw = stage.clientWidth-32; const vh = stage.clientHeight-32; const sw = el.offsetWidth; const sh = el.offsetHeight; const s = Math.min(vw/sw, vh/sh); scaleInput.value = Math.max(10, Math.min(200, Math.floor(s*100))); applyScale(); };
+//   document.addEventListener('keydown', (e)=>{ if(e.key==='ArrowRight') show(cur+1); if(e.key==='ArrowLeft') show(cur-1); });
+//   document.querySelectorAll('#thumbs li').forEach(li=> li.onclick = ()=> show(parseInt(li.dataset.go,10)) );
+//   show(0); applyScale();
+// })();`
+
+// const mathJaxLoader = `window.MathJax = { loader: {load: ['input/mml','output/chtml']}, startup: {typeset: true} }; (function(){ var s=document.createElement('script'); s.src='https://cdn.jsdelivr.net/npm/mathjax@3/es5/startup.js'; document.head.appendChild(s); })();`
