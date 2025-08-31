@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	mathfinder "pptx2html/math"
+	"pptx2html/shapefinder"
 	"pptx2html/textfinder"
 	"strconv"
 	"strings"
@@ -128,7 +129,7 @@ func runStyle(run textfinder.TextRun) string {
 	return strings.Join(styles, ";") + ";"
 }
 
-func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfinder.MathBox) string {
+func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfinder.MathBox, shapes []shapefinder.ShapeBox) string {
 	slideW := 1280
 	slideH := 720
 
@@ -222,6 +223,39 @@ func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfi
 
 		sb.WriteString(fmt.Sprintf("<div class='%s' style='%s'>%s</div>",
 			className, boxStyle, inner.String()))
+	}
+	// shapes
+	for _, sh := range shapes {
+		left := emuToPx(sh.X)
+		top := emuToPx(sh.Y)
+		w := emuToPx(sh.Cx)
+		h := emuToPx(sh.Cy)
+
+		fill := "none"
+		if sh.Fill != "" {
+			fill = sh.Fill
+		}
+		stroke := "black"
+		if sh.Stroke != "" {
+			stroke = sh.Stroke
+		}
+
+		svg := ""
+		switch sh.Geom {
+		case "rect":
+			svg = fmt.Sprintf(`<rect x="0" y="0" width="%d" height="%d" fill="%s" stroke="%s"/>`, w, h, fill, stroke)
+		case "ellipse":
+			svg = fmt.Sprintf(`<ellipse cx="%d" cy="%d" rx="%d" ry="%d" fill="%s" stroke="%s"/>`, w/2, h/2, w/2, h/2, fill, stroke)
+		case "star4":
+			svg = fmt.Sprintf(`<polygon points="%d,0 %d,%d %d,%d %d,%d" fill="%s" stroke="%s"/>`,
+				w/2, w, h/2, w/2, h, 0, h/2, fill, stroke)
+		default:
+			svg = fmt.Sprintf(`<rect x="0" y="0" width="%d" height="%d" fill="%s" stroke="%s"/>`, w, h, fill, stroke)
+		}
+
+		sb.WriteString(fmt.Sprintf(
+			`<svg class="shape" style="position:absolute;left:%dpx;top:%dpx;width:%dpx;height:%dpx;">%s</svg>`,
+			left, top, w, h, svg))
 	}
 
 	sb.WriteString("</div></body></html>")

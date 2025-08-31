@@ -9,6 +9,7 @@ import (
 	"pptx2html/bgfinder"
 	"pptx2html/helper"
 	mathfinder "pptx2html/math"
+	"pptx2html/shapefinder"
 	"pptx2html/textfinder"
 )
 
@@ -61,7 +62,14 @@ func main() {
 		fmt.Println("extract math:", err)
 	}
 
-	html := helper.BuildSlideHTML(bgURI, boxes, mathBoxes)
+	shapes, err := shapefinder.ExtractShapes(r, slideIndex)
+	if err == nil {
+		for _, s := range shapes {
+			fmt.Printf("Shape: %s @ x=%d y=%d w=%d h=%d text=%q\n",
+				s.Geom, s.X, s.Y, s.Cx, s.Cy, s.Text)
+		}
+	}
+	html := helper.BuildSlideHTML(bgURI, boxes, mathBoxes, shapes)
 	if err := os.WriteFile("slide.html", []byte(html), 0644); err != nil {
 		fmt.Println("slide.html:", err)
 		return
