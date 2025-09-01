@@ -6,7 +6,6 @@ package shapefinder
 // 	"strings"
 // )
 
-// // SVGFor returns an SVG element string (path/polygon/rect/ellipse) sized to w x h px.
 // func SVGFor(s Shape, w, h int) string {
 // 	if w <= 0 || h <= 0 {
 // 		return ""

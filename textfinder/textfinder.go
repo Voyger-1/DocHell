@@ -21,22 +21,17 @@ type TextRun struct {
 }
 
 type TextBox struct {
-	Runs         []TextRun
-	X, Y, Cx, Cy int64 // EMU units
-	ShapeID      string
-	ShapeName    string
-	// Shape properties
+	Runs            []TextRun
+	X, Y, Cx, Cy    int64
+	ShapeID         string
+	ShapeName       string
 	BackgroundColor string
 	BorderColor     string
 	ShapeType       string
 }
 
-// ---------------- XML Structs ----------------
-
-// Top-level slide
 type slideXML struct {
-	SpTree spTree `xml:"cSld>spTree"`
-	// Also handle alternate content with proper namespace handling
+	SpTree           spTree `xml:"cSld>spTree"`
 	AlternateContent []struct {
 		Choice struct {
 			Sp sp `xml:"sp"`
@@ -167,7 +162,6 @@ type txBody struct {
 			RPr *rPr   `xml:"rPr"`
 			T   string `xml:"t"`
 		} `xml:"r"`
-		// Also handle the a: namespace
 		AR []struct {
 			RPr *rPr   `xml:"rPr"`
 			T   string `xml:"t"`
@@ -207,8 +201,6 @@ type xfrm struct {
 	} `xml:"ext"`
 }
 
-// ---------------- helpers ----------------
-
 func readFileFromZip(r *zip.ReadCloser, path string) ([]byte, error) {
 	path = filepath.ToSlash(path)
 	for _, f := range r.File {
@@ -233,39 +225,37 @@ func boolAttr(val string) bool {
 	return val == "1" || strings.ToLower(val) == "true"
 }
 
-// Convert scheme colors to hex values
 func convertSchemeColor(schemeColor string) string {
 	switch strings.ToLower(schemeColor) {
 	case "accent1":
-		return "4472C4" // Blue
+		return "4472C4"
 	case "accent2":
-		return "ED7D31" // Orange
+		return "ED7D31"
 	case "accent3":
-		return "A5A5A5" // Gray
+		return "A5A5A5"
 	case "accent4":
-		return "FFC000" // Yellow
+		return "FFC000"
 	case "accent5":
-		return "5B9BD5" // Light Blue
+		return "5B9BD5"
 	case "accent6":
-		return "70AD47" // Green
+		return "70AD47"
 	case "dk1":
-		return "000000" // Black
+		return "000000"
 	case "lt1":
-		return "FFFFFF" // White
+		return "FFFFFF"
 	case "dk2":
-		return "44546A" // Dark Gray
+		return "44546A"
 	case "lt2":
-		return "E7E6E6" // Light Gray
+		return "E7E6E6"
 	case "hlink":
-		return "0563C1" // Hyperlink Blue
+		return "0563C1"
 	case "folhlink":
-		return "954F72" // Followed Hyperlink Purple
+		return "954F72"
 	default:
-		return "FFFF00" // Default to black
+		return "FFFF00"
 	}
 }
 
-// Convert preset colors to hex values
 func convertPresetColor(presetColor string) string {
 	switch strings.ToLower(presetColor) {
 	case "yellow":
@@ -295,11 +285,9 @@ func convertPresetColor(presetColor string) string {
 	case "magenta":
 		return "FF00FF"
 	default:
-		return "000000" // Default to black
+		return "000000"
 	}
 }
-
-// ---------------- main API ----------------
 
 func ExtractTextBoxes(r *zip.ReadCloser, slideIndex int) ([]TextBox, error) {
 	slidePath := fmt.Sprintf("ppt/slides/slide%d.xml", slideIndex)
@@ -339,9 +327,8 @@ func ExtractTextBoxes(r *zip.ReadCloser, slideIndex int) ([]TextBox, error) {
 		out = append(out, shapes...)
 	}
 
-	// Process alternate content sections
 	for i, ac := range s.AlternateContent {
-		// Try choice first
+
 		if ac.Choice.Sp.NvPr.ID != "" {
 			shapes := processShape(ac.Choice.Sp, 0, 0)
 			if len(shapes) > 0 {
@@ -349,7 +336,7 @@ func ExtractTextBoxes(r *zip.ReadCloser, slideIndex int) ([]TextBox, error) {
 			}
 			out = append(out, shapes...)
 		}
-		// Try fallback if choice is empty
+
 		if ac.Fallback.Sp.NvPr.ID != "" {
 			shapes := processShape(ac.Fallback.Sp, 0, 0)
 			if len(shapes) > 0 {
@@ -362,8 +349,6 @@ func ExtractTextBoxes(r *zip.ReadCloser, slideIndex int) ([]TextBox, error) {
 	fmt.Printf("Total text boxes found: %d\n", len(out))
 	return out, nil
 }
-
-// ---------------- recursive processors ----------------
 
 func processShape(sp sp, parentX, parentY int64) []TextBox {
 	var out []TextBox
@@ -379,7 +364,6 @@ func processShape(sp sp, parentX, parentY int64) []TextBox {
 		tb.ShapeID, tb.ShapeName = sp.NvPr.ID, sp.NvPr.Name
 		tb.ShapeType = sp.SpPr.PrstGeom.Prst
 
-		// Extract background color
 		if sp.SpPr.SolidFill != nil {
 			if sp.SpPr.SolidFill.SrgbClr != nil {
 				tb.BackgroundColor = sp.SpPr.SolidFill.SrgbClr.Val
@@ -388,7 +372,6 @@ func processShape(sp sp, parentX, parentY int64) []TextBox {
 			}
 		}
 
-		// Extract border color
 		if sp.SpPr.Ln != nil && sp.SpPr.Ln.SolidFill != nil {
 			if sp.SpPr.Ln.SolidFill.SrgbClr != nil {
 				tb.BorderColor = sp.SpPr.Ln.SolidFill.SrgbClr.Val
@@ -397,13 +380,12 @@ func processShape(sp sp, parentX, parentY int64) []TextBox {
 			}
 		}
 		for _, p := range sp.TxBody.Para {
-			// Get default paragraph properties
+
 			var defaultRPr *rPr
 			if p.PPr != nil && p.PPr.DefRPr != nil {
 				defaultRPr = p.PPr.DefRPr
 			}
 
-			// Check for level-specific paragraph properties
 			if sp.TxBody.LstStyle != nil {
 				level := "0"
 				if p.PPr != nil && p.PPr.Lvl != "" {
@@ -451,7 +433,6 @@ func processShape(sp sp, parentX, parentY int64) []TextBox {
 				}
 			}
 
-			// Process regular r elements
 			for _, r := range p.R {
 				run := TextRun{Text: r.T}
 
@@ -462,7 +443,7 @@ func processShape(sp sp, parentX, parentY int64) []TextBox {
 					run.Underline = r.RPr.U != ""
 					if r.RPr.Sz != "" {
 						fs, _ := strconv.Atoi(r.RPr.Sz)
-						run.FontSize = fs / 100 // 1/100 pt
+						run.FontSize = fs / 100
 					}
 					if r.RPr.Latin != nil {
 						run.Font = r.RPr.Latin.Typeface
@@ -471,16 +452,16 @@ func processShape(sp sp, parentX, parentY int64) []TextBox {
 						if r.RPr.SolidFill.SrgbClr != nil {
 							run.Color = r.RPr.SolidFill.SrgbClr.Val
 						} else if r.RPr.SolidFill.SchemeClr != nil {
-							// Convert scheme colors to hex
+
 							schemeColor := r.RPr.SolidFill.SchemeClr.Val
 							run.Color = convertSchemeColor(schemeColor)
 						} else if r.RPr.SolidFill.PrstClr != nil {
-							// Convert preset colors to hex
+
 							presetColor := r.RPr.SolidFill.PrstClr.Val
 							run.Color = convertPresetColor(presetColor)
 						}
 					}
-					// If no color in RPr, try to use default
+
 					if run.Color == "" && defaultRPr != nil && defaultRPr.SolidFill != nil {
 						if defaultRPr.SolidFill.SrgbClr != nil {
 							run.Color = defaultRPr.SolidFill.SrgbClr.Val
@@ -493,13 +474,13 @@ func processShape(sp sp, parentX, parentY int64) []TextBox {
 						}
 					}
 				} else if defaultRPr != nil {
-					// Apply default paragraph properties if no run properties
+
 					run.Bold = boolAttr(defaultRPr.B)
 					run.Italic = boolAttr(defaultRPr.I)
 					run.Underline = defaultRPr.U != ""
 					if defaultRPr.Sz != "" {
 						fs, _ := strconv.Atoi(defaultRPr.Sz)
-						run.FontSize = fs / 100 // 1/100 pt
+						run.FontSize = fs / 100
 					}
 					if defaultRPr.Latin != nil {
 						run.Font = defaultRPr.Latin.Typeface
@@ -509,12 +490,12 @@ func processShape(sp sp, parentX, parentY int64) []TextBox {
 							run.Color = defaultRPr.SolidFill.SrgbClr.Val
 
 						} else if defaultRPr.SolidFill.SchemeClr != nil {
-							// Convert scheme colors to hex
+
 							schemeColor := defaultRPr.SolidFill.SchemeClr.Val
 							run.Color = convertSchemeColor(schemeColor)
 
 						} else if defaultRPr.SolidFill.PrstClr != nil {
-							// Convert preset colors to hex
+
 							presetColor := defaultRPr.SolidFill.PrstClr.Val
 							run.Color = convertPresetColor(presetColor)
 
@@ -528,7 +509,7 @@ func processShape(sp sp, parentX, parentY int64) []TextBox {
 					tb.Runs = append(tb.Runs, run)
 				}
 			}
-			// Process a:r elements (a: namespace)
+
 			for _, r := range p.AR {
 				run := TextRun{Text: r.T}
 				if r.RPr != nil {
@@ -537,7 +518,7 @@ func processShape(sp sp, parentX, parentY int64) []TextBox {
 					run.Underline = r.RPr.U != ""
 					if r.RPr.Sz != "" {
 						fs, _ := strconv.Atoi(r.RPr.Sz)
-						run.FontSize = fs / 100 // 1/100 pt
+						run.FontSize = fs / 100
 					}
 					if r.RPr.Latin != nil {
 						run.Font = r.RPr.Latin.Typeface
@@ -546,23 +527,23 @@ func processShape(sp sp, parentX, parentY int64) []TextBox {
 						if r.RPr.SolidFill.SrgbClr != nil {
 							run.Color = r.RPr.SolidFill.SrgbClr.Val
 						} else if r.RPr.SolidFill.SchemeClr != nil {
-							// Convert scheme colors to hex
+
 							schemeColor := r.RPr.SolidFill.SchemeClr.Val
 							run.Color = convertSchemeColor(schemeColor)
 						} else if r.RPr.SolidFill.PrstClr != nil {
-							// Convert preset colors to hex
+
 							presetColor := r.RPr.SolidFill.PrstClr.Val
 							run.Color = convertPresetColor(presetColor)
 						}
 					}
 				} else if defaultRPr != nil {
-					// Apply default paragraph properties if no run properties
+
 					run.Bold = boolAttr(defaultRPr.B)
 					run.Italic = boolAttr(defaultRPr.I)
 					run.Underline = defaultRPr.U != ""
 					if defaultRPr.Sz != "" {
 						fs, _ := strconv.Atoi(defaultRPr.Sz)
-						run.FontSize = fs / 100 // 1/100 pt
+						run.FontSize = fs / 100
 					}
 					if defaultRPr.Latin != nil {
 						run.Font = defaultRPr.Latin.Typeface
@@ -571,11 +552,10 @@ func processShape(sp sp, parentX, parentY int64) []TextBox {
 						if defaultRPr.SolidFill.SrgbClr != nil {
 							run.Color = defaultRPr.SolidFill.SrgbClr.Val
 						} else if defaultRPr.SolidFill.SchemeClr != nil {
-							// Convert scheme colors to hex
+
 							schemeColor := defaultRPr.SolidFill.SchemeClr.Val
 							run.Color = convertSchemeColor(schemeColor)
 						} else if defaultRPr.SolidFill.PrstClr != nil {
-							// Convert preset colors to hex
 							presetColor := defaultRPr.SolidFill.PrstClr.Val
 							run.Color = convertPresetColor(presetColor)
 						}

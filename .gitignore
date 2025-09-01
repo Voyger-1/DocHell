@@ -31,7 +31,6 @@ go.work.sum
 # .idea/
 # .vscode/
 
-*.htm
 *.html
 *.pptx
 pptStuff/

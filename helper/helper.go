@@ -69,63 +69,56 @@ func runStyle(run textfinder.TextRun) string {
 	styles = append(styles, "z-index:1")
 	styles = append(styles, "position:relative")
 
-	// Font weight
 	if run.Bold {
 		styles = append(styles, "font-weight:bold")
 	} else {
 		styles = append(styles, "font-weight:normal")
 	}
 
-	// Font style
 	if run.Italic {
 		styles = append(styles, "font-style:italic")
 	} else {
 		styles = append(styles, "font-style:normal")
 	}
 
-	// Underline
 	if run.Underline {
 		styles = append(styles, "text-decoration:underline")
 	}
 
-	// Font size with better conversion
 	if run.FontSize > 0 {
 		pt := float64(run.FontSize)
 		px := int(pt*1.333 + 0.5)
 		if px < 12 {
-			px = 12 // Minimum readable size
+			px = 12
 		}
 		styles = append(styles, "font-size:"+strconv.Itoa(px)+"px")
 	} else {
-		styles = append(styles, "font-size:16px") // Default size
+		styles = append(styles, "font-size:16px")
 	}
 
-	// Font family
 	if run.Font != "" {
 		font := strings.ReplaceAll(run.Font, "\"", "")
-		// Add fallback fonts
+
 		styles = append(styles, "font-family:"+font+",Arial,sans-serif")
 	} else {
 		styles = append(styles, "font-family:Arial,sans-serif")
 	}
 
-	// Color with better handling
 	if run.Color != "" {
 		c := strings.TrimSpace(run.Color)
 		if !strings.HasPrefix(c, "#") {
 			c = "#" + c
 		}
-		// Ensure color is valid
+
 		if len(c) == 7 && c[0] == '#' {
 			styles = append(styles, "color:"+c)
 		} else {
-			styles = append(styles, "color:#000000") // Default black
+			styles = append(styles, "color:#000000")
 		}
 	} else {
-		styles = append(styles, "color:#000000") // Default black
+		styles = append(styles, "color:#000000")
 	}
 
-	// Additional text properties
 	styles = append(styles, "line-height:1.2")
 	styles = append(styles, "margin:0")
 	styles = append(styles, "padding:0")
@@ -150,7 +143,7 @@ func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfi
 	sb.WriteString(".math div{font-size:24px;text-align:center;}")
 	sb.WriteString(".text-box{background:transparent;border:none;}")
 	sb.WriteString(".shape{background:transparent;border:1px solid transparent;}")
-	sb.WriteString(".slide img{position:absolute;}") // for images
+	sb.WriteString(".slide img{position:absolute;}")
 	sb.WriteString("</style></head><body>")
 	sb.WriteString(`<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>`)
 
@@ -164,7 +157,6 @@ func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfi
 			slideW, slideH))
 	}
 
-	// Render math boxes
 	for _, mb := range mathBoxes {
 		left := emuToPx(mb.X)
 		top := emuToPx(mb.Y)
@@ -183,7 +175,6 @@ func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfi
 			left, top, w, h, htmlEscape(mb.Latex)))
 	}
 
-	// Render text boxes
 	for _, tb := range boxes {
 		left := emuToPx(tb.X)
 		top := emuToPx(tb.Y)
@@ -228,7 +219,6 @@ func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfi
 			className, boxStyle, inner.String()))
 	}
 
-	// Render shapes
 	for _, sh := range shapes {
 		left := emuToPx(sh.X)
 		top := emuToPx(sh.Y)

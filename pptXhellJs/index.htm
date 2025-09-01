@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+  </head>
+  <body>
+    <p>How many</p>
+    <button id="idk">Call</button>
+    <input type="text" id="txt1" />
+    <div id="container"></div>
+    <script>
+      let val = 1;
+      const container = document.getElementById("container");
+      document.getElementById("txt1").addEventListener("change", function () {
+        val = this.value;
+        console.log(val);
+      });
+      document.getElementById("idk").addEventListener("click", function () {
+        for (let i = 1; i <= val; i++) {
+          const p = document.createElement("p");
+          p.innerText = i;
+          p.style.cursor = "pointer";
+          p.addEventListener("click", function () {
+            window.location.href = `slide${i}.html`;
+          });
+          container.appendChild(p);
+        }
+      });
+
+      window.addEventListener("DOMContentLoaded", function () {
+        const txt1 = document.getElementById("txt1");
+        const storedVal = localStorage.getItem("pptxhelljs_val");
+        if (storedVal !== null) {
+          txt1.value = storedVal;
+          val = storedVal;
+          for (let i = 1; i <= val; i++) {
+            const p = document.createElement("p");
+            p.innerText = i;
+            p.style.cursor = "pointer";
+            p.addEventListener("click", function () {
+              window.location.href = `slide${i}.html`;
+            });
+            container.appendChild(p);
+          }
+        }
+      });
+
+      document.getElementById("txt1").addEventListener("change", function () {
+        val = this.value;
+        localStorage.setItem("pptxhelljs_val", val);
+        console.log(val);
+      });
+    </script>
+  </body>
+</html>

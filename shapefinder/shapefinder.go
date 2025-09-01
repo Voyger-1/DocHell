@@ -96,15 +96,12 @@ func ExtractShapes(r *zip.ReadCloser, slideIndex int) ([]ShapeBox, error) {
 					Cy:   shp.SpPr.Xfrm.Ext.Cy,
 					Geom: shp.SpPr.Geom.Prst,
 				}
-				// fill color
 				if shp.SpPr.Fill.Clr.Val != "" {
 					sb.Fill = "#" + shp.SpPr.Fill.Clr.Val
 				}
-				// stroke color
 				if shp.SpPr.Line.Fill.Clr.Val != "" {
 					sb.Stroke = "#" + shp.SpPr.Line.Fill.Clr.Val
 				}
-				// text inside
 				var textParts []string
 				for _, p := range shp.TxBody.P {
 					for _, r := range p.R {

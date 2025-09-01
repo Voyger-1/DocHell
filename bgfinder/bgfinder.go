@@ -9,7 +9,6 @@ import (
 	"strings"
 )
 
-// Slide XML structs
 type Slide struct {
 	Bg *Bg `xml:"cSld>bg"`
 }
@@ -27,7 +26,7 @@ type BlipFill struct {
 }
 
 type Blip struct {
-	Embed string `xml:"embed,attr"` // r:embed
+	Embed string `xml:"embed,attr"`
 }
 
 type Relationship struct {
@@ -40,25 +39,22 @@ type Relationships struct {
 	Rel []Relationship `xml:"Relationship"`
 }
 
-// FindBackground recursively searches for a background image starting at a slide/layout/master
 func FindBackground(r *zip.ReadCloser, xmlPath, relsPath string, depth int) (string, string, error) {
 	if depth > 5 {
 		return "", "", fmt.Errorf("recursion too deep, stopping")
 	}
 
-	// get XML file
 	xmlData, err := readFileFromZip(r, xmlPath)
 	if err != nil {
 		return "", "", err
 	}
 
-	// unmarshal for<bg>
 	var slide Slide
 	_ = xml.Unmarshal(xmlData, &slide)
 
 	if slide.Bg != nil && slide.Bg.BgPr != nil && slide.Bg.BgPr.BlipFill != nil {
 		embedID := slide.Bg.BgPr.BlipFill.Blip.Embed
-		// read relationships
+
 		relsData, _ := readFileFromZip(r, relsPath)
 		if relsData != nil {
 			var rels Relationships
@@ -73,7 +69,6 @@ func FindBackground(r *zip.ReadCloser, xmlPath, relsPath string, depth int) (str
 		}
 	}
 
-	// If no bg, try to follow layout/master
 	relsData, _ := readFileFromZip(r, relsPath)
 	if relsData == nil {
 		return "", "", fmt.Errorf("no relationships for %s", xmlPath)
@@ -100,7 +95,6 @@ func FindBackground(r *zip.ReadCloser, xmlPath, relsPath string, depth int) (str
 	return "", "", fmt.Errorf("no background found in %s", xmlPath)
 }
 
-// helper to read from zip
 func readFileFromZip(r *zip.ReadCloser, name string) ([]byte, error) {
 	for _, f := range r.File {
 		if filepath.ToSlash(f.Name) == name {

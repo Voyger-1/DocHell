@@ -17,7 +17,6 @@ type MathBox struct {
 	Latex        string
 }
 
-// ExtractMath extracts OMML math blocks from a slide and converts them to LaTeX.
 func ExtractMath(r *zip.ReadCloser, slideIndex int) ([]MathBox, error) {
 	slidePath := fmt.Sprintf("ppt/slides/slide%d.xml", slideIndex)
 
@@ -46,7 +45,7 @@ func ExtractMath(r *zip.ReadCloser, slideIndex int) ([]MathBox, error) {
 				}
 				switch t := tok.(type) {
 				case xml.StartElement:
-					// Track shape positioning
+
 					if t.Name.Local == "sp" {
 						inSp = true
 						shapeX, shapeY, shapeCx, shapeCy = 0, 0, 0, 0
@@ -54,8 +53,7 @@ func ExtractMath(r *zip.ReadCloser, slideIndex int) ([]MathBox, error) {
 					if t.Name.Local == "spPr" || t.Name.Local == "xfrm" {
 						inShape = true
 					}
-					
-					// Check for positioning attributes in shapes
+
 					if inShape && inSp {
 						for _, attr := range t.Attr {
 							switch attr.Name.Local {
@@ -83,7 +81,7 @@ func ExtractMath(r *zip.ReadCloser, slideIndex int) ([]MathBox, error) {
 						inOMML = true
 						buf.Reset()
 						buf.WriteString("<" + t.Name.Local + ">")
-						// Use shape positioning if available
+
 						if shapeX > 0 || shapeY > 0 {
 							currentX, currentY = shapeX, shapeY
 							currentCx, currentCy = shapeCx, shapeCy
@@ -98,7 +96,7 @@ func ExtractMath(r *zip.ReadCloser, slideIndex int) ([]MathBox, error) {
 					if t.Name.Local == "spPr" || t.Name.Local == "xfrm" {
 						inShape = false
 					}
-					
+
 					if inOMML {
 						buf.WriteString("</" + t.Name.Local + ">")
 						if t.Name.Local == "oMathPara" || t.Name.Local == "oMath" {
@@ -124,52 +122,40 @@ func ExtractMath(r *zip.ReadCloser, slideIndex int) ([]MathBox, error) {
 	return boxes, nil
 }
 
-// OmmlToLatex converts OMML XML string into LaTeX with comprehensive conversion rules
 func OmmlToLatex(omml string) string {
-	// Clean up the OMML string
+
 	omml = strings.TrimSpace(omml)
-	
-	// Remove XML namespaces for easier parsing
+
 	omml = regexp.MustCompile(`xmlns:[^=]*="[^"]*"`).ReplaceAllString(omml, "")
 	omml = regexp.MustCompile(`m:`).ReplaceAllString(omml, "")
-	
-	// Convert fractions
+
 	omml = convertFractions(omml)
-	
-	// Convert superscripts
+
 	omml = convertSuperscripts(omml)
-	
-	// Convert subscripts
+
 	omml = convertSubscripts(omml)
-	
-	// Convert square roots
+
 	omml = convertSquareRoots(omml)
-	
-	// Convert integrals
+
 	omml = convertIntegrals(omml)
-	
-	// Convert sums and products
+
 	omml = convertSumsAndProducts(omml)
-	
-	// Convert Greek letters
+
 	omml = convertGreekLetters(omml)
-	
-	// Convert basic operators
+
 	omml = convertBasicOperators(omml)
-	
-	// Extract text content and clean up
+
 	result := extractTextContent(omml)
-	
-	// If no meaningful conversion happened, return a placeholder
+
 	if result == "" || result == omml {
 		return "x + y"
 	}
-	
+
 	return result
 }
 
 func convertFractions(omml string) string {
-	// Match <f><num>...</num><den>...</den></f>
+
 	re := regexp.MustCompile(`<f><num>(.*?)</num><den>(.*?)</den></f>`)
 	return re.ReplaceAllStringFunc(omml, func(match string) string {
 		parts := re.FindStringSubmatch(match)
@@ -183,7 +169,7 @@ func convertFractions(omml string) string {
 }
 
 func convertSuperscripts(omml string) string {
-	// Match <sup>...</sup>
+
 	re := regexp.MustCompile(`<sup>(.*?)</sup>`)
 	return re.ReplaceAllStringFunc(omml, func(match string) string {
 		parts := re.FindStringSubmatch(match)
@@ -196,7 +182,7 @@ func convertSuperscripts(omml string) string {
 }
 
 func convertSubscripts(omml string) string {
-	// Match <sub>...</sub>
+
 	re := regexp.MustCompile(`<sub>(.*?)</sub>`)
 	return re.ReplaceAllStringFunc(omml, func(match string) string {
 		parts := re.FindStringSubmatch(match)
@@ -209,7 +195,7 @@ func convertSubscripts(omml string) string {
 }
 
 func convertSquareRoots(omml string) string {
-	// Match <rad><radPr><degHide val="on"/></radPr><deg></deg><e>...</e></rad>
+
 	re := regexp.MustCompile(`<rad><radPr><degHide val="on"/></radPr><deg></deg><e>(.*?)</e></rad>`)
 	return re.ReplaceAllStringFunc(omml, func(match string) string {
 		parts := re.FindStringSubmatch(match)
@@ -222,7 +208,7 @@ func convertSquareRoots(omml string) string {
 }
 
 func convertIntegrals(omml string) string {
-	// Match <nary><naryPr><chr val="∫"/></naryPr><sub>...</sub><sup>...</sup><e>...</e></nary>
+
 	re := regexp.MustCompile(`<nary><naryPr><chr val="∫"/></naryPr><sub>(.*?)</sub><sup>(.*?)</sup><e>(.*?)</e></nary>`)
 	return re.ReplaceAllStringFunc(omml, func(match string) string {
 		parts := re.FindStringSubmatch(match)
@@ -237,7 +223,7 @@ func convertIntegrals(omml string) string {
 }
 
 func convertSumsAndProducts(omml string) string {
-	// Convert sums
+
 	re := regexp.MustCompile(`<nary><naryPr><chr val="∑"/></naryPr><sub>(.*?)</sub><sup>(.*?)</sup><e>(.*?)</e></nary>`)
 	omml = re.ReplaceAllStringFunc(omml, func(match string) string {
 		parts := re.FindStringSubmatch(match)
@@ -249,8 +235,7 @@ func convertSumsAndProducts(omml string) string {
 		}
 		return match
 	})
-	
-	// Convert products
+
 	re = regexp.MustCompile(`<nary><naryPr><chr val="∏"/></naryPr><sub>(.*?)</sub><sup>(.*?)</sup><e>(.*?)</e></nary>`)
 	return re.ReplaceAllStringFunc(omml, func(match string) string {
 		parts := re.FindStringSubmatch(match)
@@ -279,11 +264,11 @@ func convertGreekLetters(omml string) string {
 		"Ρ": "\\Rho", "Σ": "\\Sigma", "Τ": "\\Tau", "Υ": "\\Upsilon",
 		"Φ": "\\Phi", "Χ": "\\Chi", "Ψ": "\\Psi", "Ω": "\\Omega",
 	}
-	
+
 	for greek, latex := range greekMap {
 		omml = strings.ReplaceAll(omml, greek, latex)
 	}
-	
+
 	return omml
 }
 
@@ -295,22 +280,21 @@ func convertBasicOperators(omml string) string {
 		"∇": "\\nabla", "∈": "\\in", "∉": "\\notin", "⊂": "\\subset",
 		"⊃": "\\supset", "∪": "\\cup", "∩": "\\cap", "∅": "\\emptyset",
 	}
-	
+
 	for op, latex := range operatorMap {
 		omml = strings.ReplaceAll(omml, op, latex)
 	}
-	
+
 	return omml
 }
 
 func extractTextContent(omml string) string {
-	// Remove all XML tags and extract text content
+
 	re := regexp.MustCompile(`<[^>]*>`)
 	content := re.ReplaceAllString(omml, "")
-	
-	// Clean up whitespace
+
 	content = strings.TrimSpace(content)
 	content = regexp.MustCompile(`\s+`).ReplaceAllString(content, " ")
-	
+
 	return content
 }
