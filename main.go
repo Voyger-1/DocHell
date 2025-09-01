@@ -77,7 +77,7 @@ func main() {
 		images, _ := imagefinder.ExtractImages(r, 6)
 
 		html := helper.BuildSlideHTML(bgURI, boxes, mathBoxes, shapes, images)
-		name := "slide" + strconv.Itoa(slideIndex+1) + ".html"
+		name := "slide" + strconv.Itoa(slideIndex) + ".html"
 		if err := os.WriteFile(name, []byte(html), 0644); err != nil {
 			fmt.Println("slide.html:", err)
 			return

@@ -261,7 +261,7 @@ func convertSchemeColor(schemeColor string) string {
 	case "folhlink":
 		return "954F72" // Followed Hyperlink Purple
 	default:
-		return "000000" // Default to black
+		return "FFFF00" // Default to black
 	}
 }
 
