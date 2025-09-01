@@ -12,6 +12,7 @@ import (
 	mathfinder "pptXhell/math"
 	"pptXhell/shapefinder"
 	"pptXhell/textfinder"
+	"pptXhell/videofinder"
 )
 
 func main() {
@@ -59,6 +60,7 @@ func main() {
 			fmt.Println("extract text:", err)
 			return
 		}
+		boxes = textfinder.ApplyColorFallback(r, slideIndex, boxes)
 
 		mathBoxes, err := mathfinder.ExtractMath(r, slideIndex)
 		if err != nil {
@@ -76,7 +78,13 @@ func main() {
 		//Need to Fix as Images are coming for all slides
 		images, _ := imagefinder.ExtractImages(r, 6)
 
-		html := helper.BuildSlideHTML(bgURI, boxes, mathBoxes, shapes, images)
+		videos, err := videofinder.ExtractVideos(r, slideIndex)
+		if err != nil {
+			fmt.Println("extract videos:", err)
+			videos = []videofinder.VideoBox{}
+		}
+
+		html := helper.BuildSlideHTML(bgURI, boxes, mathBoxes, shapes, images, videos)
 		name := "slide" + strconv.Itoa(slideIndex) + ".html"
 		if err := os.WriteFile(name, []byte(html), 0644); err != nil {
 			fmt.Println("slide.html:", err)

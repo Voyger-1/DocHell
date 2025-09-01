@@ -11,6 +11,7 @@ import (
 	mathfinder "pptXhell/math"
 	"pptXhell/shapefinder"
 	"pptXhell/textfinder"
+	"pptXhell/videofinder"
 	"strconv"
 	"strings"
 )
@@ -127,7 +128,7 @@ func runStyle(run textfinder.TextRun) string {
 
 }
 
-func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfinder.MathBox, shapes []shapefinder.ShapeBox, images []imagefinder.ImageBox) string {
+func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfinder.MathBox, shapes []shapefinder.ShapeBox, images []imagefinder.ImageBox, videos []videofinder.VideoBox) string {
 	slideW := 1280
 	slideH := 720
 
@@ -271,6 +272,27 @@ func BuildSlideHTML(bgURI string, boxes []textfinder.TextBox, mathBoxes []mathfi
 		// sb.WriteString(fmt.Sprintf(
 		// 	`<img src="data:image/png;base64,%s" style="left:%dpx;top:%dpx;width:%dpx;height:%dpx;">`,
 		// 	img.Base64, left, top, w, h))
+	}
+
+	// Render videos
+	for _, video := range videos {
+		left := emuToPx(video.X)
+		top := emuToPx(video.Y)
+		w := emuToPx(video.Cx)
+		h := emuToPx(video.Cy)
+		if w == 0 {
+			w = 400
+		}
+		if h == 0 {
+			h = 300
+		}
+
+		sb.WriteString(fmt.Sprintf(
+			`<video controls style="position:absolute;left:%dpx;top:%dpx;width:%dpx;height:%dpx;z-index:10;">
+				<source src="data:%s;base64,%s" type="%s">
+				Your browser does not support the video tag.
+			</video>`,
+			left, top, w, h, video.MimeType, video.Base64, video.MimeType))
 	}
 
 	sb.WriteString("</div></body></html>")
