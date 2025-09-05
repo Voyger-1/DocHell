@@ -1,0 +1,1053 @@
+// package main
+
+// import (
+// 	"archive/zip"
+// 	"encoding/json"
+// 	"fmt"
+// 	"io"
+// 	"os"
+// 	"path/filepath"
+// 	"regexp"
+// 	"strconv"
+// 	"strings"
+// )
+
+// type Link struct {
+// 	Href   string `json:"href"`
+// 	Text   string `json:"text"`
+// 	X      int    `json:"x"`
+// 	Y      int    `json:"y"`
+// 	Width  int    `json:"width"`
+// 	Height int    `json:"height"`
+// }
+
+// type Media struct {
+// 	File   string `json:"file"`
+// 	Type   string `json:"type"`
+// 	X      int    `json:"x"`
+// 	Y      int    `json:"y"`
+// 	Width  int    `json:"width"`
+// 	Height int    `json:"height"`
+// }
+
+// type Slide struct {
+// 	Slide string  `json:"slide"`
+// 	Links []Link  `json:"links"`
+// 	Media []Media `json:"media"`
+// }
+
+// type Metadata struct {
+// 	Author      string `json:"author"`
+// 	Title       string `json:"title"`
+// 	SlideCount  string `json:"slideCount"`
+// 	Application string `json:"application"`
+// 	Company     string `json:"company"`
+// }
+
+// type Result struct {
+// 	Metadata Metadata `json:"metadata"`
+// 	Slides   []Slide  `json:"slides"`
+// }
+
+// type Relationship struct {
+// 	Id     string
+// 	Target string
+// 	Type   string
+// }
+
+// // --- Fixed target slide size (you can change these values)
+// const (
+// 	TargetSlideWidth  = 600
+// 	TargetSlideHeight = 800
+// )
+
+// // Default PowerPoint slide size in EMUs (10in x 7.5in)
+// const (
+// 	SlideWidthEMU  = 9144000
+// 	SlideHeightEMU = 6858000
+// )
+
+// // Convert EMU → px normalized to target slide size
+// func emuToPxX(emu string) int {
+// 	val, _ := strconv.Atoi(emu)
+// 	return int(float64(val) / float64(SlideWidthEMU) * TargetSlideWidth)
+// }
+// func emuToPxY(emu string) int {
+// 	val, _ := strconv.Atoi(emu)
+// 	return int(float64(val) / float64(SlideHeightEMU) * TargetSlideHeight)
+// }
+
+// // --- Extractor ---
+// func extractPPTX(pptxPath string, outJSON string) error {
+// 	r, err := zip.OpenReader(pptxPath)
+// 	if err != nil {
+// 		return fmt.Errorf("cannot open pptx: %v", err)
+// 	}
+// 	defer r.Close()
+
+// 	files := map[string]*zip.File{}
+// 	for _, f := range r.File {
+// 		files[f.Name] = f
+// 	}
+
+// 	var result Result
+// 	result.Metadata = Metadata{}
+
+// 	// --- Parse core.xml (metadata) ---
+// 	if f, ok := files["docProps/core.xml"]; ok {
+// 		data := readZipFile(f)
+// 		if m := regexp.MustCompile(`<dc:creator>(.*?)</dc:creator>`).FindStringSubmatch(data); m != nil {
+// 			result.Metadata.Author = m[1]
+// 		}
+// 		if m := regexp.MustCompile(`<dc:title>(.*?)</dc:title>`).FindStringSubmatch(data); m != nil {
+// 			result.Metadata.Title = m[1]
+// 		}
+// 	}
+// 	if f, ok := files["docProps/app.xml"]; ok {
+// 		data := readZipFile(f)
+// 		if m := regexp.MustCompile(`<Slides>(\d+)</Slides>`).FindStringSubmatch(data); m != nil {
+// 			result.Metadata.SlideCount = m[1]
+// 		}
+// 		if m := regexp.MustCompile(`<Application>(.*?)</Application>`).FindStringSubmatch(data); m != nil {
+// 			result.Metadata.Application = m[1]
+// 		}
+// 		if m := regexp.MustCompile(`<Company>(.*?)</Company>`).FindStringSubmatch(data); m != nil {
+// 			result.Metadata.Company = m[1]
+// 		}
+// 	}
+
+// 	// --- Loop slides ---
+// 	for i := 1; ; i++ {
+// 		slidePath := fmt.Sprintf("ppt/slides/slide%d.xml", i)
+// 		f, ok := files[slidePath]
+// 		if !ok {
+// 			break
+// 		}
+// 		xmlStr := readZipFile(f)
+
+// 		// parse relationships
+// 		relsPath := fmt.Sprintf("ppt/slides/_rels/slide%d.xml.rels", i)
+// 		rels := map[string]Relationship{}
+// 		if rf, ok := files[relsPath]; ok {
+// 			relsXML := readZipFile(rf)
+// 			re := regexp.MustCompile(`<Relationship Id="(.*?)" Type="(.*?)" Target="(.*?)"/>`)
+// 			for _, m := range re.FindAllStringSubmatch(relsXML, -1) {
+// 				rels[m[1]] = Relationship{Id: m[1], Type: m[2], Target: m[3]}
+// 			}
+// 		}
+
+// 		var links []Link
+// 		var mediaList []Media
+
+// 		// --- Extract hyperlinks ---
+// 		spRe := regexp.MustCompile(`(?s)<p:sp>.*?</p:sp>`)
+// 		for _, sp := range spRe.FindAllString(xmlStr, -1) {
+// 			text := ""
+// 			if m := regexp.MustCompile(`<a:t>(.*?)</a:t>`).FindAllStringSubmatch(sp, -1); m != nil {
+// 				for _, mm := range m {
+// 					text += mm[1]
+// 				}
+// 			}
+// 			href := ""
+// 			if m := regexp.MustCompile(`r:id="(rId\d+)"`).FindStringSubmatch(sp); m != nil {
+// 				if rel, ok := rels[m[1]]; ok {
+// 					href = rel.Target
+// 				}
+// 			}
+// 			x, y, w, h := extractCoords(sp)
+// 			if href != "" || text != "" {
+// 				links = append(links, Link{Href: href, Text: text, X: x, Y: y, Width: w, Height: h})
+// 			}
+// 		}
+
+// 		// --- Extract media (images, video, audio) ---
+// 		picRe := regexp.MustCompile(`(?s)<p:pic>.*?</p:pic>`)
+// 		for _, pic := range picRe.FindAllString(xmlStr, -1) {
+// 			rid := ""
+// 			if m := regexp.MustCompile(`r:embed="(rId\d+)"`).FindStringSubmatch(pic); m != nil {
+// 				rid = m[1]
+// 			}
+// 			x, y, w, h := extractCoords(pic)
+// 			if rid != "" {
+// 				if rel, ok := rels[rid]; ok {
+// 					mtype := ""
+// 					if strings.Contains(rel.Type, "image") {
+// 						mtype = "image"
+// 					} else if strings.Contains(rel.Type, "video") {
+// 						mtype = "video"
+// 					} else if strings.Contains(rel.Type, "audio") {
+// 						mtype = "audio"
+// 					}
+// 					if mtype != "" {
+// 						fileName := exportFile(rel.Target, files, "output_media")
+// 						mediaList = append(mediaList, Media{File: fileName, Type: mtype, X: x, Y: y, Width: w, Height: h})
+// 					}
+// 				}
+// 			}
+// 		}
+
+// 		result.Slides = append(result.Slides, Slide{
+// 			Slide: fmt.Sprint(i),
+// 			Links: links,
+// 			Media: mediaList,
+// 		})
+// 	}
+
+// 	// --- Write JSON ---
+// 	out, _ := json.MarshalIndent(result, "", "  ")
+// 	return os.WriteFile(outJSON, out, 0644)
+// }
+
+// // --- Helpers ---
+// func readZipFile(f *zip.File) string {
+// 	rc, _ := f.Open()
+// 	defer rc.Close()
+// 	buf, _ := io.ReadAll(rc)
+// 	return string(buf)
+// }
+
+// func extractCoords(xml string) (int, int, int, int) {
+// 	offRe := regexp.MustCompile(`<a:off x="(\d+)" y="(\d+)"`)
+// 	extRe := regexp.MustCompile(`<a:ext cx="(\d+)" cy="(\d+)"`)
+// 	x, y, w, h := 0, 0, 0, 0
+// 	if m := offRe.FindStringSubmatch(xml); m != nil {
+// 		x = emuToPxX(m[1])
+// 		y = emuToPxY(m[2])
+// 	}
+// 	if m := extRe.FindStringSubmatch(xml); m != nil {
+// 		w = emuToPxX(m[1])
+// 		h = emuToPxY(m[2])
+// 	}
+// 	return x, y, w, h
+// }
+
+// func exportFile(target string, files map[string]*zip.File, outDir string) string {
+// 	target = strings.TrimPrefix(target, "../")
+// 	if f, ok := files["ppt/"+target]; ok {
+// 		os.MkdirAll(outDir, 0755)
+// 		outPath := filepath.Join(outDir, filepath.Base(target))
+// 		rc, _ := f.Open()
+// 		defer rc.Close()
+// 		out, _ := os.Create(outPath)
+// 		defer out.Close()
+// 		io.Copy(out, rc)
+// 		return outPath
+// 	}
+// 	return ""
+// }
+
+// func main() {
+// 	if len(os.Args) < 3 {
+// 		fmt.Println("Usage: go run pptx_extractor.go <input.pptx> <output.json>")
+// 		return
+// 	}
+// 	pptxPath := os.Args[1]
+// 	outJSON := os.Args[2]
+// 	if err := extractPPTX(pptxPath, outJSON); err != nil {
+// 		fmt.Println("Error:", err)
+// 	} else {
+// 		fmt.Println("Extracted metadata written to", outJSON)
+// 	}
+// }
+
+package main
+
+import (
+	"archive/zip"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+type Link struct {
+	Href   string `json:"href"`
+	Text   string `json:"text"`
+	X      int    `json:"x"`
+	Y      int    `json:"y"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+}
+
+type Media struct {
+	File   string `json:"file"`
+	Type   string `json:"type"` // "image", "video", "audio"
+	X      int    `json:"x"`
+	Y      int    `json:"y"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+}
+
+type Slide struct {
+	Slide string  `json:"slide"`
+	Links []Link  `json:"links"`
+	Media []Media `json:"media"`
+}
+
+type Metadata struct {
+	Author      string `json:"author"`
+	Title       string `json:"title"`
+	SlideCount  string `json:"slideCount"`
+	Application string `json:"application"`
+	Company     string `json:"company"`
+}
+
+type Result struct {
+	Metadata Metadata `json:"metadata"`
+	Slides   []Slide  `json:"slides"`
+}
+
+type Relationship struct {
+	Id     string
+	Target string
+	Type   string
+}
+
+// // --- EMU (English Metric Unit) to Pixels conversion
+// func emuToPx(emu string) int {
+// 	val, _ := strconv.Atoi(emu)
+// 	return int(float64(val) / 914400.0 * 96.0)
+// }
+
+const (
+	SlideWidthEMU  = 9999
+	SlideHeightEMU = 8778240
+)
+
+func emuToPxX(emu string) int {
+
+	// val, _ := strconv.Atoi(emu)
+	// //w
+	// return int(float64(val) / float64(SlideWidthEMU) * 750)
+	val, err := strconv.ParseInt(emu, 10, 64)
+	if err != nil {
+		return 0
+	}
+	px := float64(val) / 914400.0 * 96.0
+	return int(math.Round(px))
+}
+
+func emuToPxY(emu string) int {
+	// val, _ := strconv.Atoi(emu)
+	// return int(float64(val) / float64(SlideHeightEMU) * 400)
+	val, err := strconv.ParseInt(emu, 10, 64)
+	if err != nil {
+		return 0
+	}
+	px := float64(val) / 914400.0 * 96.0
+	return int(math.Round(px))
+}
+
+var (
+	// flexible regexes (allow attributes in any order / whitespace)
+	offRe = regexp.MustCompile(`<a:off[^>]*x="(\d+)"[^>]*y="(\d+)"`)
+	extRe = regexp.MustCompile(`<a:ext[^>]*cx="(\d+)"[^>]*cy="(\d+)"`)
+	// find r:embed or r:link occurrences (captures rId)
+	rIdRe = regexp.MustCompile(`r:(?:embed|link)\s*=\s*"(rId\d+)"`)
+)
+
+// readZipFile reads a file inside the pptx zip and returns contents as string
+func readZipFile(f *zip.File) string {
+	rc, _ := f.Open()
+	if rc == nil {
+		return ""
+	}
+	defer rc.Close()
+	buf, _ := io.ReadAll(rc)
+	return string(buf)
+}
+
+// find nearest coords for a match position (matchPos is index in xmlStr)
+func getCoordsNear(xmlStr string, matchPos int) (int, int, int, int) {
+	// Look backwards for the last <p:... tag start before matchPos
+	parentStart := strings.LastIndex(xmlStr[:matchPos], "<p:")
+	if parentStart < 0 {
+		// fallback: use small window before match
+		parentStart = matchPos - 2000
+		if parentStart < 0 {
+			parentStart = 0
+		}
+	}
+
+	// window up to the match (prefer coordinates before the embed)
+	windowBefore := xmlStr[parentStart:matchPos]
+	// window after (if not present before)
+	windowAfterEnd := matchPos + 2000
+	if windowAfterEnd > len(xmlStr) {
+		windowAfterEnd = len(xmlStr)
+	}
+	windowAfter := xmlStr[matchPos:windowAfterEnd]
+
+	// Try to find the last off/ext in windowBefore
+	x, y, w, h := 0, 0, 0, 0
+
+	if offMatches := offRe.FindAllStringSubmatch(windowBefore, -1); len(offMatches) > 0 {
+		last := offMatches[len(offMatches)-1]
+		x = emuToPxX(last[1])
+		y = emuToPxY(last[2])
+	}
+	if extMatches := extRe.FindAllStringSubmatch(windowBefore, -1); len(extMatches) > 0 {
+		last := extMatches[len(extMatches)-1]
+		w = emuToPxX(last[1])
+		h = emuToPxY(last[2])
+	}
+
+	// if offMatches := offRe.FindAllStringSubmatch(windowBefore, -1); len(offMatches) > 0 {
+	// 	last := offMatches[len(offMatches)-1]
+	// 	x = emuToPx(last[1])
+	// 	y = emuToPx(last[2])
+	// }
+	// if extMatches := extRe.FindAllStringSubmatch(windowBefore, -1); len(extMatches) > 0 {
+	// 	last := extMatches[len(extMatches)-1]
+	// 	w = emuToPx(last[1])
+	// 	h = emuToPx(last[2])
+	// }
+
+	// If either off or ext not found, try in windowAfter
+	if x == 0 && y == 0 {
+		if offMatches := offRe.FindAllStringSubmatch(windowAfter, -1); len(offMatches) > 0 {
+			first := offMatches[0]
+			x = emuToPxY(first[1])
+			y = emuToPxY(first[2])
+		}
+	}
+	if w == 0 && h == 0 {
+		if extMatches := extRe.FindAllStringSubmatch(windowAfter, -1); len(extMatches) > 0 {
+			first := extMatches[0]
+			w = emuToPxY(first[1])
+			h = emuToPxY(first[2])
+		}
+	}
+
+	return x, y, w, h
+}
+
+func exportFile(target string, files map[string]*zip.File, outDir string) string {
+	target = strings.TrimPrefix(target, "../") // common in rel targets
+	// sometimes target already contains ppt/ prefix
+	key := "ppt/" + target
+	if f, ok := files[key]; ok {
+		os.MkdirAll(outDir, 0755)
+		outPath := filepath.Join(outDir, filepath.Base(target))
+		rc, _ := f.Open()
+		if rc == nil {
+			return ""
+		}
+		defer rc.Close()
+		out, _ := os.Create(outPath)
+		if out == nil {
+			return ""
+		}
+		defer out.Close()
+		io.Copy(out, rc)
+		return outPath
+	}
+	// fallback: maybe target has no ../ and already contains ppt/
+	if f, ok := files[target]; ok {
+		os.MkdirAll(outDir, 0755)
+		outPath := filepath.Join(outDir, filepath.Base(target))
+		rc, _ := f.Open()
+		if rc == nil {
+			return ""
+		}
+		defer rc.Close()
+		out, _ := os.Create(outPath)
+		if out == nil {
+			return ""
+		}
+		defer out.Close()
+		io.Copy(out, rc)
+		return outPath
+	}
+	return ""
+}
+
+// main extractor
+func extractPPTX(pptxPath string, outJSON string) error {
+	r, err := zip.OpenReader(pptxPath)
+	if err != nil {
+		return fmt.Errorf("cannot open pptx: %v", err)
+	}
+	defer r.Close()
+
+	files := map[string]*zip.File{}
+	for _, f := range r.File {
+		files[f.Name] = f
+	}
+
+	var result Result
+	result.Metadata = Metadata{}
+
+	// --- Parse core.xml (metadata) ---
+	if f, ok := files["docProps/core.xml"]; ok {
+		data := readZipFile(f)
+		if m := regexp.MustCompile(`<dc:creator>(.*?)</dc:creator>`).FindStringSubmatch(data); m != nil {
+			result.Metadata.Author = m[1]
+		}
+		if m := regexp.MustCompile(`<dc:title>(.*?)</dc:title>`).FindStringSubmatch(data); m != nil {
+			result.Metadata.Title = m[1]
+		}
+	}
+	if f, ok := files["docProps/app.xml"]; ok {
+		data := readZipFile(f)
+		if m := regexp.MustCompile(`<Slides>(\d+)</Slides>`).FindStringSubmatch(data); m != nil {
+			result.Metadata.SlideCount = m[1]
+		}
+		if m := regexp.MustCompile(`<Application>(.*?)</Application>`).FindStringSubmatch(data); m != nil {
+			result.Metadata.Application = m[1]
+		}
+		if m := regexp.MustCompile(`<Company>(.*?)</Company>`).FindStringSubmatch(data); m != nil {
+			result.Metadata.Company = m[1]
+		}
+	}
+
+	// ensure output dir for media
+	os.MkdirAll("output_media", 0755)
+
+	// --- Loop slides ---
+	for i := 1; ; i++ {
+		slidePath := fmt.Sprintf("ppt/slides/slide%d.xml", i)
+		f, ok := files[slidePath]
+		if !ok {
+			break
+		}
+		xmlStr := readZipFile(f)
+
+		// parse relationships for this slide
+		relsPath := fmt.Sprintf("ppt/slides/_rels/slide%d.xml.rels", i)
+		rels := map[string]Relationship{}
+		if rf, ok := files[relsPath]; ok {
+			relsXML := readZipFile(rf)
+			// capture Relationship elements (attributes order varies)
+			relRe := regexp.MustCompile(`<Relationship[^>]*Id="([^"]+)"[^>]*Type="([^"]+)"[^>]*Target="([^"]+)"[^>]*\/?>`)
+			for _, m := range relRe.FindAllStringSubmatch(relsXML, -1) {
+				rels[m[1]] = Relationship{Id: m[1], Type: m[2], Target: m[3]}
+			}
+		}
+
+		var links []Link
+		var mediaList []Media
+
+		// --- Extract hyperlinks from <p:sp> and related text nodes ---
+		spRe := regexp.MustCompile(`(?s)<p:sp.*?>.*?</p:sp>`)
+		for _, sp := range spRe.FindAllString(xmlStr, -1) {
+			// collect text inside <a:t>
+			text := ""
+			if m := regexp.MustCompile(`<a:t>(.*?)</a:t>`).FindAllStringSubmatch(sp, -1); m != nil {
+				for _, mm := range m {
+					text += mm[1]
+				}
+			}
+			// find hyperlink rId (commonly on <a:hlinkClick r:id="rIdX"/> or on shape's r:id attrs)
+			href := ""
+			if m := regexp.MustCompile(`a:hlinkClick[^>]*r:id="(rId\d+)"`).FindStringSubmatch(sp); m != nil {
+				if rel, ok := rels[m[1]]; ok {
+					href = rel.Target
+				}
+			} else if m := regexp.MustCompile(`r:id="(rId\d+)"`).FindStringSubmatch(sp); m != nil {
+				if rel, ok := rels[m[1]]; ok && strings.Contains(strings.ToLower(rel.Type), "hyperlink") {
+					href = rel.Target
+				}
+			}
+			x, y, w, h := getCoordsNear(xmlStr, strings.Index(xmlStr, sp)+len(sp)/2)
+			if href != "" || text != "" {
+				links = append(links, Link{Href: href, Text: text, X: x, Y: y, Width: w, Height: h})
+			}
+		}
+
+		// --- Extract all r:embed / r:link occurrences (images, video, audio, etc.)
+		// We'll find each rId occurrence in the slide XML and attempt to resolve it + coords
+		for _, match := range rIdRe.FindAllStringSubmatchIndex(xmlStr, -1) {
+			// match: [fullStart, fullEnd, capStart, capEnd]
+			if len(match) < 4 {
+				continue
+			}
+			capStart := match[2]
+			capEnd := match[3]
+			rid := xmlStr[capStart:capEnd]
+			// find coords near the match position (use full match start)
+			matchPos := match[0]
+			x, y, w, h := getCoordsNear(xmlStr, matchPos)
+
+			// resolve relationship
+			if rel, ok := rels[rid]; ok {
+				// ignore hyperlinks here (we handle links above)
+				ltype := strings.ToLower(rel.Type)
+				ext := strings.ToLower(filepath.Ext(rel.Target))
+				mediaKind := ""
+				// detect by relationship type or by file extension
+				if strings.Contains(ltype, "image") || ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" || ext == ".bmp" {
+					mediaKind = "image"
+				} else if strings.Contains(ltype, "video") || ext == ".mp4" || ext == ".mov" || ext == ".avi" || ext == ".wmv" || ext == ".flv" {
+					mediaKind = "video"
+				} else if strings.Contains(ltype, "audio") || ext == ".mp3" || ext == ".wav" || ext == ".m4a" || ext == ".aac" {
+					mediaKind = "audio"
+				} else {
+					// sometimes media are stored as package relationships - check target path
+					if strings.Contains(strings.ToLower(rel.Target), "media/") {
+						// fallback to extension inspection
+						switch ext {
+						case ".png", ".jpg", ".jpeg", ".gif", ".bmp":
+							mediaKind = "image"
+						case ".mp4", ".mov", ".avi", ".wmv", ".flv":
+							mediaKind = "video"
+						case ".mp3", ".wav", ".m4a", ".aac":
+							mediaKind = "audio"
+						default:
+							// unknown - skip
+						}
+					}
+				}
+
+				if mediaKind != "" {
+					local := exportFile(rel.Target, files, "output_media")
+					if local != "" {
+						mediaList = append(mediaList, Media{
+							File:   local,
+							Type:   mediaKind,
+							X:      x,
+							Y:      y,
+							Width:  w,
+							Height: h,
+						})
+					}
+				}
+			}
+		}
+
+		// append slide
+		result.Slides = append(result.Slides, Slide{
+			Slide: fmt.Sprint(i),
+			Links: links,
+			Media: mediaList,
+		})
+	}
+
+	// --- Write JSON ---
+	out, _ := json.MarshalIndent(result, "", "  ")
+	return os.WriteFile(outJSON, out, 0644)
+}
+
+func main() {
+	if len(os.Args) < 3 {
+		fmt.Println("Usage: go run pptx_extractor_improved.go <input.pptx> <output.json>")
+		return
+	}
+	pptxPath := os.Args[1]
+	outJSON := os.Args[2]
+	if err := extractPPTX(pptxPath, outJSON); err != nil {
+		fmt.Println("Error:", err)
+	} else {
+		fmt.Println("Extracted metadata written to", outJSON)
+	}
+}
+
+// // package main
+
+// // import (
+// // 	"archive/zip"
+// // 	"encoding/json"
+// // 	"fmt"
+// // 	"io"
+// // 	"os"
+// // 	"path/filepath"
+// // 	"regexp"
+// // 	"strconv"
+// // 	"strings"
+// // )
+
+// // type Link struct {
+// // 	Href   string `json:"href"`
+// // 	Text   string `json:"text"`
+// // 	X      int    `json:"x"`
+// // 	Y      int    `json:"y"`
+// // 	Width  int    `json:"width"`
+// // 	Height int    `json:"height"`
+// // }
+
+// // type Media struct {
+// // 	File   string `json:"file"`
+// // 	Type   string `json:"type"`
+// // 	X      int    `json:"x"`
+// // 	Y      int    `json:"y"`
+// // 	Width  int    `json:"width"`
+// // 	Height int    `json:"height"`
+// // }
+
+// // type Slide struct {
+// // 	Slide string  `json:"slide"`
+// // 	Links []Link  `json:"links"`
+// // 	Media []Media `json:"media"`
+// // }
+
+// // type Metadata struct {
+// // 	Author      string `json:"author"`
+// // 	Title       string `json:"title"`
+// // 	SlideCount  string `json:"slideCount"`
+// // 	Application string `json:"application"`
+// // 	Company     string `json:"company"`
+// // }
+
+// // type Result struct {
+// // 	Metadata Metadata `json:"metadata"`
+// // 	Slides   []Slide  `json:"slides"`
+// // }
+
+// // type Relationship struct {
+// // 	Id     string
+// // 	Target string
+// // 	Type   string
+// // }
+
+// // // --- EMU (English Metric Unit) to Pixels conversion
+// // func emuToPx(emu string) int {
+// // 	val, _ := strconv.Atoi(emu)
+// // 	return int(float64(val) / 914400.0 * 96.0)
+// // }
+
+// // // --- Extractor ---
+// // func extractPPTX(pptxPath string, outJSON string) error {
+// // 	r, err := zip.OpenReader(pptxPath)
+// // 	if err != nil {
+// // 		return fmt.Errorf("cannot open pptx: %v", err)
+// // 	}
+// // 	defer r.Close()
+
+// // 	files := map[string]*zip.File{}
+// // 	for _, f := range r.File {
+// // 		files[f.Name] = f
+// // 	}
+
+// // 	var result Result
+// // 	result.Metadata = Metadata{}
+
+// // 	// --- Parse core.xml (metadata) ---
+// // 	if f, ok := files["docProps/core.xml"]; ok {
+// // 		data := readZipFile(f)
+// // 		if m := regexp.MustCompile(`<dc:creator>(.*?)</dc:creator>`).FindStringSubmatch(data); m != nil {
+// // 			result.Metadata.Author = m[1]
+// // 		}
+// // 		if m := regexp.MustCompile(`<dc:title>(.*?)</dc:title>`).FindStringSubmatch(data); m != nil {
+// // 			result.Metadata.Title = m[1]
+// // 		}
+// // 	}
+// // 	if f, ok := files["docProps/app.xml"]; ok {
+// // 		data := readZipFile(f)
+// // 		if m := regexp.MustCompile(`<Slides>(\d+)</Slides>`).FindStringSubmatch(data); m != nil {
+// // 			result.Metadata.SlideCount = m[1]
+// // 		}
+// // 		if m := regexp.MustCompile(`<Application>(.*?)</Application>`).FindStringSubmatch(data); m != nil {
+// // 			result.Metadata.Application = m[1]
+// // 		}
+// // 		if m := regexp.MustCompile(`<Company>(.*?)</Company>`).FindStringSubmatch(data); m != nil {
+// // 			result.Metadata.Company = m[1]
+// // 		}
+// // 	}
+
+// // 	// --- Loop slides ---
+// // 	for i := 1; ; i++ {
+// // 		slidePath := fmt.Sprintf("ppt/slides/slide%d.xml", i)
+// // 		f, ok := files[slidePath]
+// // 		if !ok {
+// // 			break
+// // 		}
+// // 		xmlStr := readZipFile(f)
+
+// // 		// parse relationships
+// // 		relsPath := fmt.Sprintf("ppt/slides/_rels/slide%d.xml.rels", i)
+// // 		rels := map[string]Relationship{}
+// // 		if rf, ok := files[relsPath]; ok {
+// // 			relsXML := readZipFile(rf)
+// // 			re := regexp.MustCompile(`<Relationship Id="(.*?)" Type="(.*?)" Target="(.*?)"/>`)
+// // 			for _, m := range re.FindAllStringSubmatch(relsXML, -1) {
+// // 				rels[m[1]] = Relationship{Id: m[1], Type: m[2], Target: m[3]}
+// // 			}
+// // 		}
+
+// // 		var links []Link
+// // 		var mediaList []Media
+
+// // 		// --- Extract hyperlinks ---
+// // 		spRe := regexp.MustCompile(`(?s)<p:sp>.*?</p:sp>`)
+// // 		for _, sp := range spRe.FindAllString(xmlStr, -1) {
+// // 			text := ""
+// // 			if m := regexp.MustCompile(`<a:t>(.*?)</a:t>`).FindAllStringSubmatch(sp, -1); m != nil {
+// // 				for _, mm := range m {
+// // 					text += mm[1]
+// // 				}
+// // 			}
+// // 			href := ""
+// // 			if m := regexp.MustCompile(`r:id="(rId\d+)"`).FindStringSubmatch(sp); m != nil {
+// // 				if rel, ok := rels[m[1]]; ok {
+// // 					href = rel.Target
+// // 				}
+// // 			}
+// // 			x, y, w, h := extractCoords(sp)
+// // 			if href != "" || text != "" {
+// // 				links = append(links, Link{Href: href, Text: text, X: x, Y: y, Width: w, Height: h})
+// // 			}
+// // 		}
+
+// // 		// --- Extract media (images, video, audio) ---
+// // 		picRe := regexp.MustCompile(`(?s)<p:pic>.*?</p:pic>`)
+// // 		for _, pic := range picRe.FindAllString(xmlStr, -1) {
+// // 			rid := ""
+// // 			if m := regexp.MustCompile(`r:embed="(rId\d+)"`).FindStringSubmatch(pic); m != nil {
+// // 				rid = m[1]
+// // 			}
+// // 			x, y, w, h := extractCoords(pic)
+// // 			if rid != "" {
+// // 				if rel, ok := rels[rid]; ok {
+// // 					mtype := ""
+// // 					if strings.Contains(rel.Type, "image") {
+// // 						mtype = "image"
+// // 					} else if strings.Contains(rel.Type, "video") {
+// // 						mtype = "video"
+// // 					} else if strings.Contains(rel.Type, "audio") {
+// // 						mtype = "audio"
+// // 					}
+// // 					if mtype != "" {
+// // 						fileName := exportFile(rel.Target, files, "output_media")
+// // 						mediaList = append(mediaList, Media{File: fileName, Type: mtype, X: x, Y: y, Width: w, Height: h})
+// // 					}
+// // 				}
+// // 			}
+// // 		}
+
+// // 		result.Slides = append(result.Slides, Slide{
+// // 			Slide: fmt.Sprint(i),
+// // 			Links: links,
+// // 			Media: mediaList,
+// // 		})
+// // 	}
+
+// // 	// --- Write JSON ---
+// // 	out, _ := json.MarshalIndent(result, "", "  ")
+// // 	return os.WriteFile(outJSON, out, 0644)
+// // }
+
+// // // --- Helpers ---
+// // func readZipFile(f *zip.File) string {
+// // 	rc, _ := f.Open()
+// // 	defer rc.Close()
+// // 	buf, _ := io.ReadAll(rc)
+// // 	return string(buf)
+// // }
+
+// // func extractCoords(xml string) (int, int, int, int) {
+// // 	offRe := regexp.MustCompile(`<a:off x="(\d+)" y="(\d+)"`)
+// // 	extRe := regexp.MustCompile(`<a:ext cx="(\d+)" cy="(\d+)"`)
+// // 	x, y, w, h := 0, 0, 0, 0
+// // 	if m := offRe.FindStringSubmatch(xml); m != nil {
+// // 		x = emuToPx(m[1])
+// // 		y = emuToPx(m[2])
+// // 	}
+// // 	if m := extRe.FindStringSubmatch(xml); m != nil {
+// // 		w = emuToPx(m[1])
+// // 		h = emuToPx(m[2])
+// // 	}
+// // 	return x, y, w, h
+// // }
+
+// // func exportFile(target string, files map[string]*zip.File, outDir string) string {
+// // 	target = strings.TrimPrefix(target, "../")
+// // 	if f, ok := files["ppt/"+target]; ok {
+// // 		os.MkdirAll(outDir, 0755)
+// // 		outPath := filepath.Join(outDir, filepath.Base(target))
+// // 		rc, _ := f.Open()
+// // 		defer rc.Close()
+// // 		out, _ := os.Create(outPath)
+// // 		defer out.Close()
+// // 		io.Copy(out, rc)
+// // 		return outPath
+// // 	}
+// // 	return ""
+// // }
+
+// // func main() {
+// // 	if len(os.Args) < 3 {
+// // 		fmt.Println("Usage: go run pptx_extractor.go <input.pptx> <output.json>")
+// // 		return
+// // 	}
+// // 	pptxPath := os.Args[1]
+// // 	outJSON := os.Args[2]
+// // 	if err := extractPPTX(pptxPath, outJSON); err != nil {
+// // 		fmt.Println("Error:", err)
+// // 	} else {
+// // 		fmt.Println("Extracted metadata written to", outJSON)
+// // 	}
+// // }
+
+// // // package main
+
+// // // import (
+// // // 	"archive/zip"
+// // // 	"fmt"
+// // // 	"os"
+// // // 	"strconv"
+
+// // // 	"pptXhell/bgfinder"
+// // // 	"pptXhell/helper"
+// // // 	"pptXhell/imagefinder"
+// // // 	mathfinder "pptXhell/math"
+// // // 	"pptXhell/shapefinder"
+// // // 	"pptXhell/textfinder"
+// // // 	"pptXhell/videofinder"
+// // // )
+
+// // // func main() {
+// // // 	if len(os.Args) < 3 {
+// // // 		fmt.Println("Usage: go run main.go <pptx-file><slideIndex>")
+// // // 		return
+// // // 	}
+// // // 	pptxFile := os.Args[1]
+// // // 	slideIndexStr := os.Args[2]
+// // // 	isSingle := "-s"
+// // // 	if len(os.Args) > 3 {
+// // // 		isSingle = os.Args[3]
+// // // 	}
+
+// // // 	l, _ := strconv.Atoi(slideIndexStr)
+// // // 	// if slideIndex < 1 {
+// // // 	// 	fmt.Println("slideIndex must be >= 1")
+// // // 	// 	return
+// // // 	// }
+
+// // // 	r, err := zip.OpenReader(pptxFile)
+// // // 	if err != nil {
+// // // 		fmt.Println("open pptx:", err)
+// // // 		return
+// // // 	}
+// // // 	defer r.Close()
+
+// // // 	if isSingle == "-m" {
+// // // 		for slideIndex := 1; slideIndex < l; slideIndex++ {
+
+// // // 			slidePath := fmt.Sprintf("ppt/slides/slide%d.xml", slideIndex)
+// // // 			relsPath := fmt.Sprintf("ppt/slides/_rels/slide%d.xml.rels", slideIndex)
+
+// // // 			mediaPath := ""
+// // // 			if _, mp, err := bgfinder.FindBackground(r, slidePath, relsPath, 0); err == nil {
+// // // 				mediaPath = mp
+// // // 			}
+
+// // // 			bgURI := ""
+// // // 			if mediaPath != "" {
+// // // 				a := helper.NormalizeMediaPath(mediaPath)
+// // // 				uri, err := helper.MediaDataURIFromZip(r, a)
+// // // 				fmt.Println("Background media:", a, err)
+// // // 				if err == nil {
+// // // 					bgURI = uri
+// // // 				}
+// // // 			}
+
+// // // 			boxes, err := textfinder.ExtractTextBoxes(r, slideIndex)
+// // // 			if err != nil {
+// // // 				fmt.Println("extract text:", err)
+// // // 				return
+// // // 			}
+// // // 			boxes = textfinder.ApplyColorFallback(r, slideIndex, boxes)
+
+// // // 			mathBoxes, err := mathfinder.ExtractMath(r, slideIndex)
+// // // 			if err != nil {
+// // // 				fmt.Println("extract math:", err)
+// // // 			}
+
+// // // 			shapes, err := shapefinder.ExtractShapes(r, slideIndex)
+// // // 			if err == nil {
+// // // 				for _, s := range shapes {
+// // // 					fmt.Printf("Shape: %s @ x=%d y=%d w=%d h=%d text=%q\n",
+// // // 						s.Geom, s.X, s.Y, s.Cx, s.Cy, s.Text)
+// // // 				}
+// // // 			}
+
+// // // 			//Need to Fix as Images are coming for all slides
+// // // 			images, _ := imagefinder.ExtractImages(r, 6)
+
+// // // 			videos, err := videofinder.ExtractVideos(r, slideIndex)
+// // // 			if err != nil || len(videos) == 0 {
+// // // 				fmt.Println("extract videos:", err)
+// // // 				videos = []videofinder.VideoBox{}
+// // // 			}
+
+// // // 			html := helper.BuildSlideHTML(bgURI, boxes, mathBoxes, shapes, images, videos)
+// // // 			name := "slide" + strconv.Itoa(slideIndex) + ".html"
+// // // 			if err := os.WriteFile(name, []byte(html), 0644); err != nil {
+// // // 				fmt.Println("slide.html:", err)
+// // // 				return
+// // // 			}
+// // // 		}
+// // // 		fmt.Println("Multiple IDFK")
+// // // 		return
+// // // 	} else {
+// // // 		slideIndex := l
+// // // 		slidePath := fmt.Sprintf("ppt/slides/slide%d.xml", slideIndex)
+// // // 		relsPath := fmt.Sprintf("ppt/slides/_rels/slide%d.xml.rels", slideIndex)
+
+// // // 		mediaPath := ""
+// // // 		if _, mp, err := bgfinder.FindBackground(r, slidePath, relsPath, 0); err == nil {
+// // // 			mediaPath = mp
+// // // 		}
+
+// // // 		bgURI := ""
+// // // 		if mediaPath != "" {
+// // // 			a := helper.NormalizeMediaPath(mediaPath)
+// // // 			uri, err := helper.MediaDataURIFromZip(r, a)
+// // // 			fmt.Println("Background media:", a, err)
+// // // 			if err == nil {
+// // // 				bgURI = uri
+// // // 			}
+// // // 		}
+
+// // // 		boxes, err := textfinder.ExtractTextBoxes(r, slideIndex)
+// // // 		if err != nil {
+// // // 			fmt.Println("extract text:", err)
+// // // 			return
+// // // 		}
+// // // 		boxes = textfinder.ApplyColorFallback(r, slideIndex, boxes)
+
+// // // 		mathBoxes, err := mathfinder.ExtractMath(r, slideIndex)
+// // // 		if err != nil {
+// // // 			fmt.Println("extract math:", err)
+// // // 		}
+
+// // // 		shapes, err := shapefinder.ExtractShapes(r, slideIndex)
+// // // 		if err == nil {
+// // // 			for _, s := range shapes {
+// // // 				fmt.Printf("Shape: %s @ x=%d y=%d w=%d h=%d text=%q\n",
+// // // 					s.Geom, s.X, s.Y, s.Cx, s.Cy, s.Text)
+// // // 			}
+// // // 		}
+
+// // // 		//Need to Fix as Images are coming for all slides
+// // // 		// images, _ := imagefinder.ExtractImages(r, 6)
+
+// // // 		images, err := imagefinder.ExtractImages(r, slideIndex)
+// // // 		if err != nil {
+// // // 			fmt.Println("extract images:", err)
+// // // 			images = []imagefinder.ImageBox{}
+// // // 		}
+
+// // // 		videos, err := videofinder.ExtractVideos(r, slideIndex)
+// // // 		if err != nil || len(videos) == 0 {
+// // // 			fmt.Println("extract videos:", err)
+// // // 			videos = []videofinder.VideoBox{}
+// // // 		}
+
+// // // 		html := helper.BuildSlideHTML(bgURI, boxes, mathBoxes, shapes, images, videos)
+// // // 		name := "slide" + strconv.Itoa(slideIndex) + ".html"
+// // // 		if err := os.WriteFile(name, []byte(html), 0644); err != nil {
+// // // 			fmt.Println("slide.html:", err)
+// // // 			return
+// // // 		}
+
+// // // 		fmt.Println("Single IDFK")
+
+// // // 	}
+
+// // // }

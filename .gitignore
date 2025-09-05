@@ -31,6 +31,14 @@ go.work.sum
 # .idea/
 # .vscode/
 
+
+node_modules/
+output_images/
+output_media/
+slide_images/
+slides/
+converted/
+meta.json
 *.html
 *.pptx
 pptStuff/
