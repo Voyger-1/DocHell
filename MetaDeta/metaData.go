@@ -1,4 +1,4 @@
-package main
+package metaData
 
 import (
 	"archive/zip"
