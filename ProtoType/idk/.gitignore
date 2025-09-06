@@ -1,0 +1,10 @@
+node_modules/
+output_media/
+slides/
+
+*.pdf
+*.ppt
+*.pptx
+meta.json
+
+*.html

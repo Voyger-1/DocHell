@@ -31,6 +31,16 @@ go.work.sum
 # .idea/
 # .vscode/
 
+ProtoType/idk/node_modules/
+
+ProtoType/idk/output_media/
+ProtoType/idk/slide_images/
+ProtoType/idk/slides
+
+ProtoType/idk/*.pptx
+ProtoType/idk/*.pdf
+
+extracted/
 
 node_modules/
 output_images/

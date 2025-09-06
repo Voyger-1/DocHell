@@ -1,0 +1,53 @@
+
+<form id="form">
+  <label>PPTX URL:
+    <input type="text" id="pptxUrl" size="70"
+      value="https://storage.googleapis.com/gotoschool/assess_test/content_data/questionwiseweeklytest/2025/09/01/1756708059823/4. Graphs of Quadratic Equations (1).pptx" />
+  </label>
+  <br><br>
+  <label>Start: <input type="number" id="slideStart" value="1" min="1" /></label>
+  <label>End: <input type="number" id="slideEnd" value="3" min="1" /></label>
+  <br><br>
+  <button type="submit">Load Slides</button>
+</form>
+
+<div id="log"></div>
+<div id="viewer"></div>
+
+<script>
+  document.getElementById("form").addEventListener("submit", function (e) {
+    e.preventDefault();
+
+    const url = document.getElementById("pptxUrl").value;
+    const start = document.getElementById("slideStart").value;
+    const end = document.getElementById("slideEnd").value;
+
+    document.getElementById("log").innerHTML = "Starting conversion...";
+    document.getElementById("viewer").innerHTML = "";
+
+    const endpoint = `http://localhost:5000/convert?url=${encodeURIComponent(url)}&start=${start}&end=${end}`;
+    const evtSource = new EventSource(endpoint);
+
+    evtSource.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      console.log("SSE:", data);
+
+      if (data.step) {
+        document.getElementById("log").innerHTML += `<div>${data.step}</div>`;
+      }
+      if (data.error) {
+        document.getElementById("log").innerHTML += `<div style="color:red">${data.error}</div>`;
+      }
+      if (data.success) {
+        const container = document.createElement("div");
+        container.className = "slide-container";
+        container.innerHTML = `<h3>Slide ${data.slide}</h3>${data.div}`;
+        document.getElementById("viewer").appendChild(container);
+      }
+      if (data.done) {
+        document.getElementById("log").innerHTML += `<div style="font-weight:bold;color:green">🎉 Finished all slides</div>`;
+        evtSource.close();
+      }
+    };
+  });
+</script>

@@ -252,7 +252,7 @@ func convertSchemeColor(schemeColor string) string {
 	case "folhlink":
 		return "954F72"
 	default:
-		return "FFFF00"
+		return "000000"
 	}
 }
 
